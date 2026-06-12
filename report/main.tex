@@ -1,0 +1,54 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{microtype}
+
+\title{Image Analysis Coursework Report}
+\author{eid23}
+\date{MPhil in Data Intensive Science\\Submission: 24 June 2026}
+
+\begin{document}
+\maketitle
+
+\section{Part I: Inverse Problems in Imaging}
+
+\subsection{A.1 Forward Problem: Simulating Image Acquisition}
+
+The first stage models the acquisition process for a diffraction-limited optical
+instrument. Starting from a clean microscopy image \(g \in \mathbb{R}^{m \times n}\),
+the observed image is generated as
+\begin{equation}
+    f = H g + w,
+\end{equation}
+where \(H\) is a point-spread-function blur operator and \(w\) is additive
+Gaussian noise. The implementation normalises the selected TIFF frame to
+floating point intensities in \([0,1]\), applies a Gaussian PSF with standard
+deviation \(\sigma = 2.0\), and then adds zero-mean Gaussian noise with
+\(\sigma_n = 0.001\). The random number generator is seeded with 42 by default,
+so the simulated acquisition is reproducible.
+
+The default command downloads the PhC-C2DH-U373 microscopy dataset, selects the
+first sorted frame from sequence 01 as the ground truth image, and writes the
+ground truth, blurred image, blurred noisy image, comparison figure, and metadata
+to \texttt{outputs/part\_i/a1/}.
+
+\begin{figure}[htbp]
+    \centering
+    \IfFileExists{../outputs/part_i/a1/comparison.png}{%
+        \includegraphics[width=\linewidth]{../outputs/part_i/a1/comparison.png}
+    }{%
+        \fbox{\parbox{0.9\linewidth}{%
+            The Part I.A.1 comparison figure has not been generated yet.
+            Run \texttt{python scripts/run\_a1.py} from the repository root.
+        }}
+    }
+    \caption{Forward acquisition simulation: clean ground truth, Gaussian-blurred
+    image, and blurred image with additive Gaussian noise.}
+    \label{fig:a1-forward}
+\end{figure}
+
+\end{document}
