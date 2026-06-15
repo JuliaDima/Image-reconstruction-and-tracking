@@ -23,6 +23,7 @@ dev = [
 
 [project.scripts]
 a1-forward = "image_analysis_coursework.cli:main"
+a2-classical = "image_analysis_coursework.cli_a2:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
