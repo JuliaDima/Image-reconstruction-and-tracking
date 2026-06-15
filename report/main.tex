@@ -112,4 +112,38 @@ fidelity term.
     \label{fig:a2-objective}
 \end{figure}
 
+\subsection{B(i) Algorithm Unrolling}
+
+For the data-driven reconstruction experiment, I implemented a learned unrolled
+proximal-gradient network. The forward operator \(H\) is a Gaussian blur with an
+\(11\times 11\) kernel and standard deviation \(2.0\). Training observations are
+simulated as \(f = Hg + w\), with white Gaussian noise of variance \(0.001\). The
+network uses \(K=6\) unrolled iterations by default:
+\begin{equation}
+    g^{(k+1)} = \phi_{\theta^{(k)}}\left(g^{(k)} - \eta^{(k)}H^\top(Hg^{(k)} - f)\right),
+\end{equation}
+where each \(\phi_{\theta^{(k)}}\) is a small CNN proximal map with two hidden
+convolutional layers and PReLU activations. The step sizes are learned as
+unconstrained parameters passed through a softplus transform, which keeps
+\(\eta^{(k)}\geq 0\) during training. The training loss is the \(\ell_1\) error
+between the final reconstruction \(g^{(K)}\) and the clean reference image.
+Training uses random crops and random horizontal/vertical flips from sequence 01;
+sequence 02 is used for test metrics.
+
+\begin{figure}[htbp]
+    \centering
+    \IfFileExists{../outputs/part_i/b1/comparison.png}{%
+        \includegraphics[width=\linewidth]{../outputs/part_i/b1/comparison.png}
+    }{%
+        \fbox{\parbox{0.9\linewidth}{%
+            The Part I.B(i) unrolled PGD comparison has not been generated yet.
+            Run \texttt{python scripts/run\_b1.py} locally for a smoke run or
+            submit it with \texttt{sbatch scripts/sbatch\_run.sh python scripts/run\_b1.py --device cuda}.
+        }}
+    }
+    \caption{Visual comparison for the unrolled PGD model: ground truth, blurred
+    noisy input, and learned reconstruction.}
+    \label{fig:b1-unrolling}
+\end{figure}
+
 \end{document}

@@ -9,6 +9,7 @@ venv/
 
 data/
 outputs/
+logs/
 
 report/*.aux
 report/*.log

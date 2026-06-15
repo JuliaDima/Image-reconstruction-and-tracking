@@ -1,0 +1,9 @@
+-e .
+imagecodecs>=2026.3.6
+matplotlib>=3.8
+numpy>=1.26
+pooch>=1.8
+scikit-image>=0.22
+torch>=2.0
+torchvision>=0.15
+pytest>=8.0
