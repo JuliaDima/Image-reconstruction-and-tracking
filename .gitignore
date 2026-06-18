@@ -10,6 +10,8 @@ venv/
 data/
 outputs/
 logs/
+runs/
+*.pt
 
 report/*.aux
 report/*.log
@@ -18,5 +20,4 @@ report/*.toc
 report/*.fls
 report/*.fdb_latexmk
 report/*.synctex.gz
-report/main.pdf
 src/image_analysis_coursework.egg-info

@@ -45,7 +45,7 @@ def download_dataset(data_dir: str | Path = "data") -> Path:
         url=DATASET_URL,
         known_hash=f"sha256:{DATASET_HASH}",
         path=data_root / "downloads",
-        progressbar=True,
+        progressbar=False,
     )
     with zipfile.ZipFile(archive_path) as archive:
         archive.extractall(data_root)
