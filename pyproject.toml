@@ -15,17 +15,31 @@ dependencies = [
     "pooch>=1.8",
     "scikit-image>=0.22",
     "torch>=2.0",
+    "scipy>=1.11",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
 ]
+ml = [
+    "ultralytics>=8.3",
+    "laptrack>=0.17",
+    "pandas>=2.0",
+]
 
 [project.scripts]
 a1-forward = "image_analysis_coursework.cli:main"
 a2-classical = "image_analysis_coursework.cli_a2:main"
 b1-unrolling = "image_analysis_coursework.cli_b1:main"
+b2-ood-unrolling = "image_analysis_coursework.cli_b2:main"
+b3-shared-convergence = "image_analysis_coursework.cli_b3:main"
+ii-a-optical-flow = "image_analysis_coursework.cli_motion:main"
+ii-b-export-yolo = "image_analysis_coursework.cli_yolo_export:main"
+ii-b-train-yolo = "image_analysis_coursework.cli_yolo_train:main"
+ii-b-predict-yolo = "image_analysis_coursework.cli_yolo_predict:main"
+ii-b-segment-sequence = "image_analysis_coursework.cli_yolo_segment_sequence:main"
+ii-c-track-cells = "image_analysis_coursework.cli_tracking:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
