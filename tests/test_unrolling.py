@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from image_analysis_coursework.unrolling import (
     GaussianBlurOperator,
+    SharedUnrolledPGD,
     UnrolledPGD,
     make_blurry_observation,
     train_unrolled_pgd,
@@ -62,3 +63,32 @@ def test_train_unrolled_pgd_smoke():
 
     assert len(history.epochs) == 1
     assert history.epochs[0]["loss"] >= 0.0
+
+
+def test_shared_unrolled_pgd_supports_longer_iteration_counts():
+    operator = GaussianBlurOperator(kernel_size=11, sigma=2.0)
+    model = SharedUnrolledPGD(operator=operator, n_iter=2, features=4)
+    image = torch.rand(1, 1, 16, 16)
+    blurry = make_blurry_observation(operator, image, noise_var=0.001)
+
+    short_output = model(blurry)
+    long_output = model(blurry, n_iter=4)
+
+    assert short_output.shape == image.shape
+    assert long_output.shape == image.shape
+    assert all(step > 0 for step in model.positive_steps())
+
+
+def test_make_blurry_observation_deterministic_with_manual_seed():
+    operator = GaussianBlurOperator(kernel_size=11, sigma=2.0)
+    image = torch.rand(1, 1, 16, 16)
+
+    torch.manual_seed(123)
+    first = make_blurry_observation(operator, image, noise_var=0.001)
+    torch.manual_seed(123)
+    second = make_blurry_observation(operator, image, noise_var=0.001)
+
+    assert torch.allclose(first, second)
+    assert first.shape == image.shape
+    assert torch.min(first) >= 0.0
+    assert torch.max(first) <= 1.0
