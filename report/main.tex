@@ -6,6 +6,7 @@
 \usepackage{graphicx}
 \usepackage{hyperref}
 \usepackage{microtype}
+\raggedbottom
 
 \title{Image Analysis Coursework Report}
 \author{eid23}
@@ -60,7 +61,7 @@ approximately solving
 \end{equation}
 where the discrete TV term is computed from forward finite differences in the
 horizontal and vertical directions. The optimisation is solved with a
-Chambolle--Pock primal-dual method. The dual variables are projected onto the
+Chambolle--Pock primal-dual method~\cite{chambollepock}. The dual variables are projected onto the
 pointwise \(\ell_2\) ball of radius \(\lambda\), and the objective value is
 recorded after each iteration.
 
@@ -72,13 +73,18 @@ texture and noise are both retained. Larger \(\lambda\) values suppress noise
 more aggressively but can flatten subtle structures. On the default frame, the
 noisy blurred observation gives PSNR 33.91 dB and SSIM 0.9219. A Gaussian filter
 with \(\sigma=1\) gives PSNR 33.35 dB and SSIM 0.9154, while TV denoising gives
-PSNR/SSIM values of 33.86/0.9201, 33.51/0.9097, and 31.85/0.8842 for
+PSNR/SSIM values of 33.86/0.9201, 33.50/0.9094, and 31.90/0.8848 for
 \(\lambda=0.001\), \(0.01\), and \(0.08\), respectively. These values show that
 the strongest regularisation is over-smoothing this example. TV regularisation
 tends to preserve edges better than a standard Gaussian filter because the
 penalty is on the magnitude of the image gradient rather than on local averaging
 itself; sharp transitions can remain when they are supported by the data
-fidelity term.
+fidelity term. Here the input noise is already very small, so every additional
+smoothing operation reduces PSNR. Moreover, the stated A.2 objective contains
+no forward operator \(H\): it is a denoising model and cannot invert the
+Gaussian blur. Thus \(\lambda=0.001\) is best numerically, while \(0.01\)
+illustrates a stronger visual noise/detail compromise rather than genuine
+deconvolution.
 
 \begin{figure}[htbp]
     \centering
@@ -127,7 +133,10 @@ between the final reconstruction \(g^{(K)}\) and the clean reference image.
 Training uses random crops and random horizontal/vertical flips from sequence 01;
 sequence 02 is used for test metrics.
 
-The full GPU run used 50 epochs. On the test sequence, the degraded input scored PSNR 28.18 dB and SSIM 0.4897, while the unrolled reconstruction improved this to PSNR 34.10 dB and SSIM 0.9113.
+The full GPU run used 50 epochs, 32 feature channels, batch size 4,
+\(128\times128\) crops and learning rate \(10^{-4}\). On all 115 images in
+sequence 02, the degraded input scored PSNR 28.18 dB and SSIM 0.4897, while the
+unrolled reconstruction improved this to PSNR 34.10 dB and SSIM 0.9113.
 
 \begin{figure}[htbp]
     \centering
@@ -153,13 +162,14 @@ trained with a more severe degradation, using a Gaussian blur kernel of size
 setting, namely an \(11\times11\) Gaussian kernel with standard deviation \(2.0\)
 and the same noise variance. This isolates whether the learned proximal maps are
 robust to a forward model mismatch. The script records average PSNR and SSIM for
-both the degraded input and the reconstruction, plus a visual comparison. The
-expected conclusion is that training on a stronger blur can make the learned
-prior more aggressive, but a mismatch in \(H\) can reduce reconstruction quality
-relative to the matched Part I.B(i) model if the learned updates overcompensate
-for blur not present at test time.
+both the degraded input and the reconstruction, plus a visual comparison. This
+tests whether training on stronger blur makes the learned prior robust or makes
+it overcompensate when the test blur is weaker.
 
-The full OOD run achieved PSNR 33.11 dB and SSIM 0.9030 on the matched test degradation. This is lower than the matched B(i) model (34.10 dB and 0.9113), which supports the expected conclusion that a learned unrolled solver is sensitive to forward-model mismatch, even when the training degradation is more severe.
+The full OOD run achieved PSNR 33.11 dB and SSIM 0.9030 on the B(i) test
+degradation. Relative to the matched B(i) model, this is a reduction of 0.99 dB
+and 0.0083 SSIM. The learned solver is therefore sensitive to a mismatch between
+the training and test forward operators, despite training on the more severe blur.
 
 \begin{figure}[htbp]
     \centering
@@ -182,10 +192,18 @@ with a single CNN proximal map and a single positive softplus-constrained step
 size reused at every layer. Training uses \(K=6\) iterations under the matched
 \(11\times11\), \(\sigma=2.0\) blur and noise variance \(0.001\). At evaluation,
 the same learned update is applied to one test image for \(T=K,4K,8K,16K\). The
-script writes a PSNR/SSIM table and a PSNR curve. If PSNR improves then plateaus,
-the learned update behaves like a stable iterative solver; if it degrades for
-large \(T\), the finite-depth training has not learned a globally stable fixed
-point. The full run achieved PSNR/SSIM values of 33.61/0.9049 at \(T=K\), 23.88/0.8278 at \(4K\), 18.05/0.5773 at \(8K\), and 6.56/0.0068 at \(16K\). The shared update is useful at the trained depth but becomes unstable when repeatedly applied far beyond the training horizon.
+script writes a PSNR/SSIM table and a PSNR curve. The measured values are:
+
+\begin{center}
+\begin{tabular}{c|rrrr}
+\(T\) & 6 & 24 & 48 & 96 \\ \hline
+PSNR (dB) & 33.61 & 23.88 & 18.05 & 6.56 \\
+SSIM & 0.9049 & 0.8278 & 0.5773 & 0.0068
+\end{tabular}
+\end{center}
+The monotonic deterioration beyond \(K\) shows that the finite-depth training
+has not learned a globally stable fixed point. The shared update is effective
+at its trained depth but should not be interpreted as a convergent solver.
 
 \begin{figure}[htbp]
     \centering
@@ -194,7 +212,11 @@ point. The full run achieved PSNR/SSIM values of 33.61/0.9049 at \(T=K\), 23.88/
     }{%
         \fbox{\parbox{0.75\linewidth}{Part I.B(iii) convergence plot generated by \texttt{python scripts/run\_b3.py}.}}
     }
-    \caption{Part I.B(iii) PSNR as the shared update is iterated beyond the training depth.}
+    \IfFileExists{../outputs/part_i/b3_full/comparison.png}{%
+        \includegraphics[width=\linewidth]{../outputs/part_i/b3_full/comparison.png}
+    }{}
+    \caption{Part I.B(iii) PSNR and reconstructions as the shared update is
+    iterated beyond the training depth.}
     \label{fig:b3-convergence}
 \end{figure}
 
@@ -202,97 +224,162 @@ point. The full run achieved PSNR/SSIM values of 33.61/0.9049 at \(T=K\), 23.88/
 
 \subsection{A. Motion Estimation}
 
-I implemented Horn--Schunck optical flow for a consecutive pair from sequence
-01. The pair is normalised to \([0,1]\), then spatial derivatives are estimated
-from the mean of the two frames and the temporal derivative is \(D_t f=f_{t+1}-f_t\).
-The implementation minimises the optical-flow constraint residual with a
-Tikhonov smoothness term,
+\paragraph{(i) Pair and change visualisation.}
+I use consecutive sequence-01 frames \texttt{t000} and \texttt{t001}, acquired
+15 minutes apart. Both are normalised to \([0,1]\). Their absolute difference
+highlights changes at cell boundaries and within textured cell interiors while
+leaving most of the substrate dark (Figure~\ref{fig:motion-summary}).
+
+\paragraph{(ii--iii) Horn--Schunck implementation and test.}
+Spatial derivatives are computed from the mean of the two frames and
+\(D_t f=f_{t+1}-f_t\). Following Horn and Schunck~\cite{hornschunck}, the
+implemented Jacobi iteration uses four-neighbour averages and minimises
 \begin{equation}
-    E(u,v)=\langle (D_xf u+D_yf v+D_tf)^2\rangle + \alpha\langle
-    |\nabla u|^2+|\nabla v|^2\rangle .
+ E(u,v)=\langle(D_xfu+D_yfv+D_tf)^2\rangle+
+ \alpha^2\langle|\nabla u|^2+|\nabla v|^2\rangle .
 \end{equation}
-Each Jacobi step uses the four-neighbour average for \(\bar u\) and \(\bar v\)
-and the standard residual-correcting update. Accuracy is tested on synthetic
-translated images by checking that the energy decreases and that the output
-shape and direction are sensible. The absolute frame difference is used as a
-simple change visualisation; it highlights locations where intracellular
-contrast changes between frames. Larger \(\alpha\) gives smoother, lower-magnitude
-flows, while more iterations reduce the energy until convergence or numerical
-plateau. For the generated run, the energy decreased from \(1.859\times10^{-3}\) to \(1.842\times10^{-3}\).
+Tests translate a synthetic square by one pixel in each cardinal direction.
+The estimated component has the correct sign and the orthogonal component is
+near zero; its magnitude is attenuated by smoothness and the aperture problem.
+
+\paragraph{(iv) Energy.}
+For \(\alpha=1\) and 100 iterations, energy falls from
+\(1.8590\times10^{-3}\) to a minimum \(1.8395\times10^{-3}\) at iteration 49,
+then rises slightly to \(1.8416\times10^{-3}\). The Jacobi sequence is therefore
+not monotonically energy decreasing; iteration 49 is a better stopping point
+than blindly using the last iterate.
+
+\paragraph{(v) Estimated flow.}
+HSV hue encodes direction and brightness encodes magnitude. Motion is
+concentrated around phase-contrast edges and intracellular texture, while the
+background is nearly stationary. The background-inclusive mean vector is
+\((\bar u,\bar v)=(-0.0026,-0.0043)\) pixels per frame and mean magnitude is
+0.0197 pixels; arrows in Figure~\ref{fig:motion-summary} are enlarged 100 times.
 
 \begin{figure}[htbp]
-    \centering
-    \IfFileExists{../outputs/part_ii/a/flow_quiver.png}{%
-        \includegraphics[width=0.48\linewidth]{../outputs/part_ii/a/flow_quiver.png}
-    }{%
-        \fbox{\parbox{0.45\linewidth}{Part II.A flow figure generated by \texttt{python scripts/run\_motion.py}.}}
-    }
-    \IfFileExists{../outputs/part_ii/a/energy.png}{%
-        \includegraphics[width=0.48\linewidth]{../outputs/part_ii/a/energy.png}
-    }{%
-        \fbox{\parbox{0.45\linewidth}{Part II.A energy plot generated by the same command.}}
-    }
-    \caption{Horn--Schunck flow and convergence trace for sequence 01.}
-    \label{fig:ii-a-flow}
+ \centering
+ \IfFileExists{../outputs/part_ii/a/motion_summary.png}{%
+  \includegraphics[width=\linewidth]{../outputs/part_ii/a/motion_summary.png}
+ }{\fbox{\parbox{0.9\linewidth}{Generated by \texttt{python scripts/run\_motion.py}.}}}
+ \caption{Input pair, absolute difference, HSV and quiver flow, and energy.
+ The dashed line marks the minimum-energy iterate.}
+ \label{fig:motion-summary}
+\end{figure}
+
+\paragraph{(vi) Regularisation and iterations.}
+The sweep in Figure~\ref{fig:motion-sweep} compares \(\alpha=0.3\), 1 and 3.
+Iteration counts are 10, 50, 100 and 200. At 100 iterations,
+mean magnitude falls from 0.110 pixels for \(\alpha=0.3\), to 0.0197 for
+\(\alpha=1\), and 0.00257 for \(\alpha=3\): stronger regularisation suppresses
+and smooths motion. Additional iterations initially propagate motion into
+neighbouring pixels, but all settings eventually pass their measured energy
+minimum. This motivates parameter validation and energy-based stopping.
+
+\begin{figure}[htbp]
+ \centering
+ \includegraphics[width=0.82\linewidth]{../outputs/part_ii/a/parameter_sweep.png}
+ \caption{Sensitivity of final energy and mean flow magnitude to \(\alpha\) and
+ iteration count.}
+ \label{fig:motion-sweep}
 \end{figure}
 
 \subsection{B. YOLO Cell Segmentation}
 
-The segmentation labels in \texttt{01\_GT/SEG} and \texttt{02\_GT/SEG} are
-converted to YOLO segmentation format by extracting each connected component,
-finding its longest contour, simplifying the polygon, and normalising polygon
-coordinates by image width and height. Sequence 01 is exported as the training
-split and sequence 02 as validation, with a \texttt{data.yaml} file containing a
-single class, \texttt{cell}. Export verification rasterises the YOLO polygons and
-overlays them on the corresponding microscopy frame. The model training script
-uses \texttt{ultralytics.YOLO}; after training, \texttt{model.val} reports the
-segmentation mAP50--95(M). The model must learn whole-cell masks while ignoring
-phase-contrast texture, background substrate structure, and partial/ambiguous
-objects near frame boundaries. Predictions are converted back to label images by
-filling each predicted polygon with \texttt{skimage.draw.polygon}. The trained YOLO model reached validation mAP50--95(M)=0.694.
+\paragraph{(i) Export.}
+All 34 annotated frames are exported: 15 sequence-01 frames for training and
+19 sequence-02 frames for validation. Each labelled component is converted to
+its longest simplified contour and coordinates are normalised by image width
+and height. Rasterising the polygons back to binary masks gives mean IoU 0.9967
+and minimum IoU 0.9769. The model must distinguish whole cells from
+phase-contrast halos, intracellular texture, debris, substrate features, and
+ambiguous partial objects at image boundaries.
+
+\paragraph{(ii) Training.}
+A pretrained \texttt{yolo11n-seg.pt} model~\cite{ultralytics} was trained on a
+GPU for 100 epochs with \(640\times640\) inputs and batch size 16. On sequence
+02, segmentation mAP50--95(M) is 0.694. This estimate is based on only 19
+validation images and is not exhaustive temporal validation.
+
+\paragraph{(iii) Label-image conversion.}
+Inference polygons are filled with \texttt{draw.polygon}; each accepted polygon receives a distinct
+positive integer and background remains zero. The confidence threshold is 0.25.
+
+\paragraph{(iv--v) Frame choice and quality.}
+I inspect unannotated early, middle and late frames \texttt{t000},
+\texttt{t057}, and \texttt{t114}, testing temporal coverage without simply
+replotting training annotations. Figure~\ref{fig:yolo} shows only 2, 3 and 2
+masks respectively despite additional visible cell-like objects. Boundaries of
+detected large cells are plausible, but recall is poor for smaller, brighter
+and partial cells. The validation mAP therefore masks meaningful under-detection
+on the complete sequence, likely due to sparse annotations.
 
 \begin{figure}[htbp]
-    \centering
-    \IfFileExists{../outputs/part_ii/b/yolo_dataset/verify_overlay.png}{%
-        \includegraphics[width=0.45\linewidth]{../outputs/part_ii/b/yolo_dataset/verify_overlay.png}
-    }{%
-        \fbox{\parbox{0.45\linewidth}{YOLO export verification generated by \texttt{python scripts/export\_yolo.py}.}}
-    }
-    \IfFileExists{../outputs/part_ii/b/prediction_overlay.png}{%
-        \includegraphics[width=0.45\linewidth]{../outputs/part_ii/b/prediction_overlay.png}
-    }{%
-        \fbox{\parbox{0.45\linewidth}{YOLO prediction overlay generated by \texttt{python scripts/run\_yolo\_predict.py}.}}
-    }
-    \caption{YOLO export verification (left) and trained-model prediction overlay on sequence 01 (right).}
-    \label{fig:ii-b-yolo}
+ \centering
+ \IfFileExists{../outputs/part_ii/b/yolo_dataset/verify_overlay.png}{%
+  \includegraphics[width=0.28\linewidth]{../outputs/part_ii/b/yolo_dataset/verify_overlay.png}
+ }{}
+ \IfFileExists{../outputs/part_ii/b/prediction_montage.png}{%
+  \includegraphics[width=0.7\linewidth]{../outputs/part_ii/b/prediction_montage.png}
+ }{}
+ \caption{Export verification (left) and predictions on early, middle and late
+ unannotated sequence-01 frames (right).}
+ \label{fig:yolo}
 \end{figure}
 
 \subsection{C. Cell Tracking}
 
-For tracking, the trained segmentation model is applied to every frame in
-sequence 01 to produce instance label images. Centroids, areas, frame indices,
-and instance labels are extracted with \texttt{skimage.measure.regionprops}. A
-tracking algorithm also needs temporal association information: the detections
-alone do not identify which cell in frame \(t+1\) corresponds to a cell in frame
-\(t\), and masks can be missing or merged. The tracking script uses
-\texttt{laptrack.LapTrack} with squared Euclidean distance, a configurable
-maximum displacement, and a one-frame gap-closing allowance. In environments
-without \texttt{laptrack}, the tested nearest-neighbour fallback links detections
-within the same distance threshold. Missing masks can be compensated by gap
-closing, motion priors, and by allowing tracks to persist briefly without a
-measurement. A direct way to relate tracks and optical flow is to average the
-dense flow inside each cell mask and compare this local internal-motion vector
-with the displacement vector of the cell centroid over the same interval. The final YOLO-derived tracking output contains 287 detections assigned to 28 tracks. The tracker can bridge short missing-mask gaps with its gap-closing allowance; longer gaps or merged masks remain the main source of track fragmentation.
+\paragraph{(i) Sequence segmentation.}
+The trained model is loaded once and applied at confidence 0.25 to all 115
+sequence-01 frames. It produces 287 masks and no mask in one frame.
+
+\paragraph{(ii) Centroids and missing information.}
+\texttt{regionprops} supplies each mask's centroid and area, but not temporal
+identity: a tracker must infer which detection in frame \(t+1\) belongs to a
+cell from frame \(t\), while handling missed, merged and split masks.
+
+\paragraph{(iii) LapTrack parameters.}
+The completed run uses \texttt{LapTrack}~\cite{laptrack}, with squared Euclidean
+linking and gap-closing costs, a 35-pixel cutoff (\(35^2=1225\)), one
+missing-frame gap, and splitting/merging disabled. At 0.65 micrometres per pixel
+this permits 22.75 micrometres per 15-minute interval. It exceeds the observed
+95th-percentile and maximum linked speeds (12.0 and 24.2 pixels/frame), providing
+margin for fast cells, although a permissive cutoff can create incorrect links.
+A one-frame gap can bridge one missing mask; longer omissions terminate a track.
+
+\paragraph{(iv) Visualisation and limitations.}
+LapTrack returns 43 tracks, with median length 3 frames, maximum length 29, and
+23 tracks lasting at most three frames (Figure~\ref{fig:tracking}). This severe
+fragmentation is consistent with YOLO under-detection and is more informative
+than the total track count alone.
 
 \begin{figure}[htbp]
-    \centering
-    \IfFileExists{../outputs/part_ii/c_yolo/tracks_overlay.png}{%
-        \includegraphics[width=0.65\linewidth]{../outputs/part_ii/c_yolo/tracks_overlay.png}
-    }{%
-        \fbox{\parbox{0.75\linewidth}{Track overlay generated by \texttt{python scripts/run\_tracking.py}.}}
-    }
-    \caption{Cell tracks overlaid on the first frame.}
-    \label{fig:ii-c-tracks}
+ \centering
+ \includegraphics[width=\linewidth]{../outputs/part_ii/c_yolo/tracking_summary.png}
+ \caption{Full trajectories projected on \texttt{t000}, detections per frame,
+ and track-length distribution. Circles and crosses mark starts and ends.}
+ \label{fig:tracking}
 \end{figure}
+
+\paragraph{(v) Relationship to optical flow.}
+For each linked cell and frame interval, I would average the dense flow inside
+its mask and compare that internal-motion vector with the centroid displacement.
+Their angle measures alignment and their magnitudes separate intracellular
+reorganisation from whole-cell translation. Uncertain or missing masks should
+be excluded or propagated with the track model.
+
+\begin{thebibliography}{9}
+\bibitem{chambollepock}
+A. Chambolle and T. Pock, A first-order primal-dual algorithm for convex
+problems with applications to imaging, \emph{J. Math. Imaging Vis.}, 2011.
+\bibitem{hornschunck}
+B. Horn and B. Schunck, Determining optical flow, \emph{Artificial
+Intelligence}, 1981.
+\bibitem{ultralytics}
+Ultralytics, \emph{YOLO segmentation documentation},
+\url{https://docs.ultralytics.com/tasks/segment/}.
+\bibitem{laptrack}
+LapTrack developers, \emph{LapTrack documentation},
+\url{https://laptrack.readthedocs.io/}.
+\end{thebibliography}
 
 \end{document}
