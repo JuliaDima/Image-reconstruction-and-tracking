@@ -123,6 +123,18 @@ def verify_yolo_export(record: ExportRecord, output_path: str | Path) -> Path:
     return output
 
 
+def export_roundtrip_iou(record: ExportRecord) -> float:
+    """Measure binary-mask agreement after YOLO polygon rasterisation."""
+
+    original = io.imread(record.source_label) > 0
+    lines = record.label_path.read_text(encoding="utf-8").splitlines()
+    restored = yolo_lines_to_label_image(lines, original.shape) > 0
+    union = np.logical_or(original, restored).sum()
+    if union == 0:
+        return 1.0
+    return float(np.logical_and(original, restored).sum() / union)
+
+
 def prediction_to_label_image(prediction: Any, image_shape: tuple[int, int]) -> np.ndarray:
     label_image = np.zeros(image_shape, dtype=np.uint16)
     masks = getattr(prediction, "masks", None)
@@ -148,26 +160,60 @@ def train_yolo_model(
 ) -> dict[str, Any]:
     from ultralytics import YOLO
 
+    dataset_yaml = (Path(yolo_dataset_dir) / "data.yaml").resolve()
+    output_path = Path(output_dir).resolve()
+    output_path.mkdir(parents=True, exist_ok=True)
     model = YOLO(model_name)
-    results = model.train(
-        data=str(Path(yolo_dataset_dir) / "data.yaml"),
+    training_results = model.train(
+        data=str(dataset_yaml),
         epochs=epochs,
         imgsz=imgsz,
-        project=str(output_dir),
+        project=str(output_path),
         name="cells",
         device=device,
+        exist_ok=True,
     )
-    metrics = model.val(data=str((Path(yolo_dataset_dir) / "data.yaml").resolve()), imgsz=imgsz, device=device)
-    map_value = getattr(getattr(metrics, "seg", None), "map", None)
-    summary = {"results": str(results), "map50_95_m": float(map_value) if map_value is not None else None}
-    output_path.mkdir(parents=True, exist_ok=True)
+    metrics = model.val(data=str(dataset_yaml), imgsz=imgsz, device=device)
+    values = getattr(metrics, "results_dict", {})
+    save_dir = Path(getattr(training_results, "save_dir", output_path / "cells")).resolve()
+    split_counts = _manifest_split_counts(Path(yolo_dataset_dir) / "export_manifest.json")
+    summary = {
+        "model": model_name,
+        "epochs": epochs,
+        "imgsz": imgsz,
+        "device": str(device) if device is not None else "auto",
+        "dataset_yaml": str(dataset_yaml),
+        "run_dir": str(save_dir),
+        "best_checkpoint": str(save_dir / "weights" / "best.pt"),
+        "train_frames": split_counts.get("train", 0),
+        "validation_frames": split_counts.get("val", 0),
+        "precision_m": _optional_float(values.get("metrics/precision(M)")),
+        "recall_m": _optional_float(values.get("metrics/recall(M)")),
+        "map50_m": _optional_float(values.get("metrics/mAP50(M)")),
+        "map50_95_m": _optional_float(values.get("metrics/mAP50-95(M)")),
+    }
     (output_path / "yolo_metrics.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     return summary
 
 
-def segment_image(model_path: str | Path, image_path: str | Path, image_shape: tuple[int, int] | None = None) -> np.ndarray:
+def load_yolo_model(model_path: str | Path) -> Any:
+    """Load an Ultralytics model once for one or more predictions."""
+
     from ultralytics import YOLO
 
+    return YOLO(str(model_path))
+
+
+def segment_image_with_model(
+    model: Any,
+    image_path: str | Path,
+    image_shape: tuple[int, int] | None = None,
+    confidence: float = 0.25,
+) -> np.ndarray:
+    """Segment one image with an already-loaded Ultralytics model."""
+
+    if not 0.0 <= confidence <= 1.0:
+        raise ValueError("confidence must lie in [0, 1]")
     image = io.imread(image_path)
     if image_shape is None:
         image_shape = image.shape[:2]
@@ -175,17 +221,59 @@ def segment_image(model_path: str | Path, image_path: str | Path, image_shape: t
         image = np.stack([image, image, image], axis=-1)
     elif image.ndim == 3 and image.shape[-1] == 1:
         image = np.repeat(image, 3, axis=-1)
-    model = YOLO(str(model_path))
-    predictions = model.predict(image, verbose=False)
+    predictions = model.predict(image, conf=confidence, verbose=False)
     return prediction_to_label_image(predictions[0], image_shape)
 
 
-def overlay_prediction(model_path: str | Path, image_path: str | Path, output_path: str | Path) -> Path:
+def segment_image(
+    model_path: str | Path,
+    image_path: str | Path,
+    image_shape: tuple[int, int] | None = None,
+    confidence: float = 0.25,
+) -> np.ndarray:
+    """Load a model and segment one image."""
+
+    model = load_yolo_model(model_path)
+    return segment_image_with_model(model, image_path, image_shape=image_shape, confidence=confidence)
+
+
+def overlay_prediction(
+    model_path: str | Path,
+    image_path: str | Path,
+    output_path: str | Path,
+    confidence: float = 0.25,
+) -> Path:
     image = io.imread(image_path)
-    labels = segment_image(model_path, image_path, image_shape=image.shape[:2])
+    labels = segment_image(model_path, image_path, image_shape=image.shape[:2], confidence=confidence)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     _save_overlay(image, labels, output, title=Path(image_path).name)
+    return output
+
+
+def save_prediction_montage(
+    model_path: str | Path,
+    image_paths: list[str | Path],
+    output_path: str | Path,
+    confidence: float = 0.25,
+) -> Path:
+    """Overlay predictions on several frames using one loaded model."""
+
+    if not image_paths:
+        raise ValueError("image_paths must not be empty")
+    model = load_yolo_model(model_path)
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig, axes = plt.subplots(1, len(image_paths), figsize=(5 * len(image_paths), 4.2), constrained_layout=True)
+    for axis, image_path in zip(np.atleast_1d(axes), image_paths, strict=True):
+        image = io.imread(image_path)
+        labels = segment_image_with_model(model, image_path, image_shape=image.shape[:2], confidence=confidence)
+        axis.imshow(image, cmap="gray")
+        axis.imshow(np.ma.masked_where(labels == 0, labels), cmap="tab20", alpha=0.45)
+        axis.set_title(f"{Path(image_path).name}: {int(labels.max())} masks")
+        axis.axis("off")
+    fig.savefig(output, dpi=200)
+    plt.close(fig)
     return output
 
 
@@ -208,3 +296,18 @@ def _record_to_json(record: ExportRecord) -> dict[str, str]:
         "source_label": str(record.source_label),
         "split": record.split,
     }
+
+
+def _optional_float(value: Any) -> float | None:
+    return float(value) if value is not None else None
+
+
+def _manifest_split_counts(path: Path) -> dict[str, int]:
+    if not path.exists():
+        return {}
+    records = json.loads(path.read_text(encoding="utf-8"))
+    counts: dict[str, int] = {}
+    for record in records:
+        split = str(record["split"])
+        counts[split] = counts.get(split, 0) + 1
+    return counts

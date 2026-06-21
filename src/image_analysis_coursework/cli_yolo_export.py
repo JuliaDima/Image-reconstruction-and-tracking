@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 
@@ -16,7 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    from image_analysis_coursework.yolo_segmentation import export_phc_dataset_to_yolo, verify_yolo_export
+    from image_analysis_coursework.yolo_segmentation import export_phc_dataset_to_yolo, export_roundtrip_iou, verify_yolo_export
 
     records = export_phc_dataset_to_yolo(data_dir=args.data_dir, output_dir=args.output_dir)
     print(f"Exported {len(records)} labelled frames to {args.output_dir}")
@@ -24,6 +25,21 @@ def main(argv: list[str] | None = None) -> int:
         record = records[min(args.verify_index, len(records) - 1)]
         overlay = verify_yolo_export(record, Path(args.output_dir) / "verify_overlay.png")
         print(f"verify_overlay: {overlay}")
+        ious = [export_roundtrip_iou(item) for item in records]
+        metrics_path = Path(args.output_dir) / "verification_metrics.json"
+        metrics_path.write_text(
+            json.dumps(
+                {
+                    "num_frames": len(ious),
+                    "mean_binary_iou": sum(ious) / len(ious),
+                    "minimum_binary_iou": min(ious),
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        print(f"verification_metrics: {metrics_path}")
     return 0
 
 
