@@ -12,6 +12,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--sequence", default="01")
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/part_ii/c/labels"))
+    parser.add_argument("--confidence", type=float, default=0.25)
     return parser
 
 
@@ -24,6 +25,7 @@ def main(argv: list[str] | None = None) -> int:
         data_dir=args.data_dir,
         sequence=args.sequence,
         output_dir=args.output_dir,
+        confidence=args.confidence,
     )
     print(f"Segmented {len(label_paths)} frames")
     for path in label_paths[:5]:
