@@ -8,6 +8,7 @@ from image_analysis_coursework.motion import (
     flow_energy,
     horn_schunck,
     local_average,
+    run_motion_parameter_sweep,
 )
 
 
@@ -44,9 +45,33 @@ def test_horn_schunck_energy_decreases_on_synthetic_pair():
     assert result.energy[-1] <= result.energy[0]
 
 
+def test_horn_schunck_recovers_translation_direction():
+    horizontal = create_synthetic_translation(size=48, shift=(0, 1))
+    vertical = create_synthetic_translation(size=48, shift=(1, 0))
+
+    horizontal_result = horn_schunck(*horizontal, alpha=1.0, num_iterations=60)
+    vertical_result = horn_schunck(*vertical, alpha=1.0, num_iterations=60)
+    mask = horizontal[0] > 0.5
+
+    assert horizontal_result.u[mask].mean() > 0.1
+    assert abs(horizontal_result.v[mask].mean()) < 0.02
+    assert vertical_result.v[mask].mean() > 0.1
+    assert abs(vertical_result.u[mask].mean()) < 0.02
+
+
 def test_flow_energy_is_zero_for_identical_images_and_zero_flow():
     image = np.zeros((8, 8), dtype=np.float32)
     fx, fy, ft = compute_derivatives(image, image)
     energy = flow_energy(np.zeros_like(image), np.zeros_like(image), fx, fy, ft, alpha=1.0)
 
     assert energy == 0.0
+
+
+def test_motion_parameter_sweep_records_all_combinations():
+    first, second = create_synthetic_translation(size=24, shift=(0, 1))
+
+    rows = run_motion_parameter_sweep(first, second, alphas=(1.0, 2.0), iteration_counts=(2, 4))
+
+    assert len(rows) == 4
+    assert {(row["alpha"], row["iterations"]) for row in rows} == {(1.0, 2), (1.0, 4), (2.0, 2), (2.0, 4)}
+    assert all(0 <= row["minimum_iteration"] <= row["iterations"] for row in rows)

@@ -63,7 +63,7 @@ def flow_energy(u: np.ndarray, v: np.ndarray, fx: np.ndarray, fy: np.ndarray, ft
     ux, uy = np.gradient(u)
     vx, vy = np.gradient(v)
     smoothness = ux**2 + uy**2 + vx**2 + vy**2
-    return float(np.mean(residual**2) + alpha * np.mean(smoothness))
+    return float(np.mean(residual**2) + alpha**2 * np.mean(smoothness))
 
 
 def horn_schunck(first: np.ndarray, second: np.ndarray, alpha: float = 1.0, num_iterations: int = 200) -> OpticalFlowResult:
@@ -111,6 +111,35 @@ def create_synthetic_translation(size: int = 64, shift: tuple[int, int] = (1, 0)
     return image, moved.astype(np.float32)
 
 
+def run_motion_parameter_sweep(
+    first: np.ndarray,
+    second: np.ndarray,
+    alphas: tuple[float, ...] = (0.3, 1.0, 3.0),
+    iteration_counts: tuple[int, ...] = (10, 50, 100, 200),
+) -> list[dict[str, float | int]]:
+    """Evaluate regularisation and iteration-count effects on one image pair."""
+
+    rows: list[dict[str, float | int]] = []
+    for alpha in alphas:
+        for iterations in iteration_counts:
+            result = horn_schunck(first, second, alpha=alpha, num_iterations=iterations)
+            energy = np.asarray(result.energy)
+            magnitude = np.hypot(result.u, result.v)
+            rows.append(
+                {
+                    "alpha": alpha,
+                    "iterations": iterations,
+                    "initial_energy": float(energy[0]),
+                    "final_energy": float(energy[-1]),
+                    "minimum_energy": float(energy.min()),
+                    "minimum_iteration": int(energy.argmin()),
+                    "mean_magnitude": float(magnitude.mean()),
+                    "p95_magnitude": float(np.percentile(magnitude, 95)),
+                }
+            )
+    return rows
+
+
 def save_optical_flow_outputs(
     first: np.ndarray,
     second: np.ndarray,
@@ -118,6 +147,7 @@ def save_optical_flow_outputs(
     output_dir: str | Path = "outputs/part_ii/a",
     frame_paths: tuple[Path, Path] | None = None,
     stride: int = 16,
+    sweep_rows: list[dict[str, float | int]] | None = None,
 ) -> dict[str, Path]:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -127,13 +157,22 @@ def save_optical_flow_outputs(
         "energy": output_path / "energy.png",
         "quiver": output_path / "flow_quiver.png",
         "hsv": output_path / "flow_hsv.png",
+        "composite": output_path / "motion_summary.png",
+        "sweep": output_path / "parameter_sweep.png",
         "metadata": output_path / "metadata.json",
     }
     _save_pair(first, second, files["pair"])
     io.imsave(files["difference"], util.img_as_ubyte(difference_image(first, second)))
     _save_energy(result, files["energy"])
     _save_quiver(first, result, files["quiver"], stride=stride)
-    io.imsave(files["hsv"], util.img_as_ubyte(np.clip(flow_to_hsv(result.u, result.v), 0.0, 1.0)))
+    hsv = np.clip(flow_to_hsv(result.u, result.v), 0.0, 1.0)
+    io.imsave(files["hsv"], util.img_as_ubyte(hsv))
+    _save_motion_summary(first, second, result, files["composite"], stride=stride)
+    if sweep_rows is not None:
+        _save_parameter_sweep(sweep_rows, files["sweep"])
+    else:
+        files.pop("sweep")
+    energy = np.asarray(result.energy)
     files["metadata"].write_text(
         json.dumps(
             {
@@ -142,9 +181,12 @@ def save_optical_flow_outputs(
                 "num_iterations": result.num_iterations,
                 "initial_energy": result.energy[0],
                 "final_energy": result.energy[-1],
+                "minimum_energy": float(energy.min()),
+                "minimum_iteration": int(energy.argmin()),
                 "mean_u": float(np.mean(result.u)),
                 "mean_v": float(np.mean(result.v)),
                 "mean_magnitude": float(np.mean(np.sqrt(result.u**2 + result.v**2))),
+                "parameter_sweep": sweep_rows,
             },
             indent=2,
         )
@@ -162,10 +204,21 @@ def run_motion_experiment(
     alpha: float = 1.0,
     num_iterations: int = 200,
     stride: int = 16,
+    sweep_alphas: tuple[float, ...] = (0.3, 1.0, 3.0),
+    sweep_iterations: tuple[int, ...] = (10, 50, 100, 200),
 ) -> tuple[OpticalFlowResult, dict[str, Path]]:
     first, second, frame_paths = load_image_pair(data_dir, sequence=sequence, index=index)
     result = horn_schunck(first, second, alpha=alpha, num_iterations=num_iterations)
-    files = save_optical_flow_outputs(first, second, result, output_dir=output_dir, frame_paths=frame_paths, stride=stride)
+    sweep_rows = run_motion_parameter_sweep(first, second, alphas=sweep_alphas, iteration_counts=sweep_iterations)
+    files = save_optical_flow_outputs(
+        first,
+        second,
+        result,
+        output_dir=output_dir,
+        frame_paths=frame_paths,
+        stride=stride,
+        sweep_rows=sweep_rows,
+    )
     return result, files
 
 
@@ -191,11 +244,79 @@ def _save_energy(result: OpticalFlowResult, output_path: Path) -> None:
 
 
 def _save_quiver(first: np.ndarray, result: OpticalFlowResult, output_path: Path, stride: int) -> None:
-    yy, xx = np.mgrid[0:first.shape[0]:stride, 0:first.shape[1]:stride]
     fig, axis = plt.subplots(figsize=(6, 6), constrained_layout=True)
+    _draw_quiver(axis, first, result, stride)
+    fig.savefig(output_path, dpi=200)
+    plt.close(fig)
+
+
+def _draw_quiver(axis: Any, first: np.ndarray, result: OpticalFlowResult, stride: int) -> None:
+    yy, xx = np.mgrid[0:first.shape[0]:stride, 0:first.shape[1]:stride]
+    u = result.u[::stride, ::stride].copy()
+    v = result.v[::stride, ::stride].copy()
+    magnitude = np.hypot(u, v)
+    cap = float(np.percentile(magnitude, 95)) if magnitude.size else 0.0
+    if cap > 0:
+        factor = np.minimum(1.0, cap / np.maximum(magnitude, 1e-12))
+        u *= factor
+        v *= factor
     axis.imshow(first, cmap="gray", vmin=0.0, vmax=1.0)
-    axis.quiver(xx, yy, result.u[::stride, ::stride], result.v[::stride, ::stride], color="tab:red", angles="xy")
-    axis.set_title("Estimated optical flow")
+    axis.quiver(
+        xx,
+        yy,
+        u,
+        v,
+        color="tab:red",
+        angles="xy",
+        scale_units="xy",
+        scale=0.01,
+        width=0.0025,
+    )
+    axis.set_title("Flow direction (vectors enlarged 100x)")
     axis.axis("off")
+
+
+def _save_motion_summary(
+    first: np.ndarray,
+    second: np.ndarray,
+    result: OpticalFlowResult,
+    output_path: Path,
+    stride: int,
+) -> None:
+    fig, axes = plt.subplots(2, 3, figsize=(12, 7), constrained_layout=True)
+    axes[0, 0].imshow(first, cmap="gray", vmin=0.0, vmax=1.0)
+    axes[0, 0].set_title("t000")
+    axes[0, 1].imshow(second, cmap="gray", vmin=0.0, vmax=1.0)
+    axes[0, 1].set_title("t001")
+    axes[0, 2].imshow(difference_image(first, second), cmap="magma", vmin=0.0, vmax=1.0)
+    axes[0, 2].set_title("Absolute difference")
+    axes[1, 0].imshow(flow_to_hsv(result.u, result.v))
+    axes[1, 0].set_title("HSV flow")
+    _draw_quiver(axes[1, 1], first, result, stride)
+    axes[1, 2].plot(result.energy)
+    minimum_iteration = int(np.argmin(result.energy))
+    axes[1, 2].axvline(minimum_iteration, color="tab:red", linestyle="--", label=f"minimum: {minimum_iteration}")
+    axes[1, 2].set(xlabel="Iteration", ylabel="Energy", title="Horn-Schunck energy")
+    axes[1, 2].legend(fontsize=8)
+    axes[1, 2].grid(True, alpha=0.3)
+    for axis in axes.flat[:4]:
+        axis.axis("off")
+    fig.savefig(output_path, dpi=200)
+    plt.close(fig)
+
+
+def _save_parameter_sweep(rows: list[dict[str, float | int]], output_path: Path) -> None:
+    fig, axes = plt.subplots(1, 2, figsize=(9, 3.5), constrained_layout=True)
+    alphas = sorted({float(row["alpha"]) for row in rows})
+    for alpha in alphas:
+        selected = sorted((row for row in rows if float(row["alpha"]) == alpha), key=lambda row: int(row["iterations"]))
+        iterations = [int(row["iterations"]) for row in selected]
+        axes[0].plot(iterations, [float(row["final_energy"]) for row in selected], marker="o", label=fr"$\alpha={alpha:g}$")
+        axes[1].plot(iterations, [float(row["mean_magnitude"]) for row in selected], marker="o", label=fr"$\alpha={alpha:g}$")
+    axes[0].set(xlabel="Iterations", ylabel="Final energy", title="Energy sensitivity")
+    axes[1].set(xlabel="Iterations", ylabel="Mean magnitude (pixels)", title="Flow sensitivity")
+    for axis in axes:
+        axis.grid(True, alpha=0.3)
+        axis.legend(fontsize=8)
     fig.savefig(output_path, dpi=200)
     plt.close(fig)

@@ -6,6 +6,14 @@ import argparse
 from pathlib import Path
 
 
+def _float_tuple(value: str) -> tuple[float, ...]:
+    return tuple(float(item.strip()) for item in value.split(",") if item.strip())
+
+
+def _int_tuple(value: str) -> tuple[int, ...]:
+    return tuple(int(item.strip()) for item in value.split(",") if item.strip())
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run Horn-Schunck optical flow on a consecutive PhC-C2DH-U373 pair.")
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
@@ -15,6 +23,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--alpha", type=float, default=1.0)
     parser.add_argument("--iterations", type=int, default=200)
     parser.add_argument("--stride", type=int, default=16)
+    parser.add_argument("--sweep-alphas", type=_float_tuple, default=(0.3, 1.0, 3.0))
+    parser.add_argument("--sweep-iterations", type=_int_tuple, default=(10, 50, 100, 200))
     return parser
 
 
@@ -30,6 +40,8 @@ def main(argv: list[str] | None = None) -> int:
         alpha=args.alpha,
         num_iterations=args.iterations,
         stride=args.stride,
+        sweep_alphas=args.sweep_alphas,
+        sweep_iterations=args.sweep_iterations,
     )
     print(f"Initial energy: {result.energy[0]:.6g}")
     print(f"Final energy: {result.energy[-1]:.6g}")
