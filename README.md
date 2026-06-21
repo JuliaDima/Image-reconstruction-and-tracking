@@ -140,10 +140,13 @@ The convergence table and plot for `T=K,4K,8K,16K` are written to `outputs/part_
 Run Horn-Schunck optical flow on a consecutive pair from sequence `01`:
 
 ```bash
-python scripts/run_motion.py --index 0 --alpha 1.0 --iterations 200
+python scripts/run_motion.py --index 0 --alpha 1.0 --iterations 100 \
+  --sweep-alphas 0.3,1,3 --sweep-iterations 10,50,100,200
 ```
 
-Outputs include the frame pair, absolute-difference image, energy trace, quiver plot, HSV flow map, and metadata under `outputs/part_ii/a/`.
+Outputs include the frame pair, absolute-difference image, energy trace, quiver
+plot, HSV flow map, parameter sweep, report-ready summary, and metadata under
+`outputs/part_ii/a/`.
 
 ## Part II.B
 
@@ -162,20 +165,47 @@ sbatch scripts/sbatch_run.sh python scripts/train_yolo.py --yolo-dataset-dir out
 Overlay predictions from a trained model:
 
 ```bash
-python scripts/run_yolo_predict.py --model-path path/to/best.pt --image-path data/PhC-C2DH-U373/01/t000.tif
+python scripts/run_yolo_predict.py \
+  --model-path outputs/part_ii/b/yolo_runs/cells/weights/best.pt \
+  --image-path data/PhC-C2DH-U373/01/t000.tif \
+               data/PhC-C2DH-U373/01/t057.tif \
+               data/PhC-C2DH-U373/01/t114.tif \
+  --output-path outputs/part_ii/b/prediction_montage.png \
+  --confidence 0.25
 ```
 
-The conversion and rasterisation utilities are in `image_analysis_coursework.yolo_segmentation`. Full YOLO training requires the optional `ultralytics` dependency.
+The conversion and rasterisation utilities are in
+`image_analysis_coursework.yolo_segmentation`. Export writes binary round-trip
+IoU statistics, while training writes a compact JSON summary containing scalar
+mask metrics and the canonical checkpoint path. Full YOLO training requires the
+optional `ultralytics` dependency.
 
 ## Part II.C
 
-After segmenting all sequence `01` frames, track the cell centroids:
+Segment every sequence `01` frame with one loaded model:
 
 ```bash
-python scripts/run_tracking.py --labels-dir outputs/part_ii/c/labels --first-frame-path data/PhC-C2DH-U373/01/t000.tif
+python scripts/run_yolo_sequence.py \
+  --model-path outputs/part_ii/b/yolo_runs/cells/weights/best.pt \
+  --data-dir data --sequence 01 \
+  --output-dir outputs/part_ii/c/labels_yolo \
+  --confidence 0.25
 ```
 
-`laptrack.LapTrack` is used when installed; otherwise the code falls back to a deterministic nearest-neighbour tracker for testing and smoke runs. Outputs are written to `outputs/part_ii/c/`.
+Then track the detected centroids:
+
+```bash
+python scripts/run_tracking.py \
+  --labels-dir outputs/part_ii/c/labels_yolo \
+  --first-frame-path data/PhC-C2DH-U373/01/t000.tif \
+  --output-dir outputs/part_ii/c_yolo \
+  --max-distance 35 --max-gap 1
+```
+
+`laptrack.LapTrack` is used when installed; otherwise the code falls back only
+when the dependency is absent. Runtime tracker errors are surfaced. Metadata
+records the actual backend, thresholds, physical distance conversion, and track
+fragmentation statistics. Outputs are written to `outputs/part_ii/c_yolo/`.
 
 
 ## Full Pipeline Submission
@@ -191,14 +221,17 @@ This submits Slurm jobs for YOLO export, full B(i), B(ii), B(iii) GPU training, 
 ```bash
 B_EPOCHS=75 YOLO_EPOCHS=150 bash scripts/submit_full_pipeline.sh
 YOLO_MODEL=yolo11n-seg.pt YOLO_DEVICE=0 bash scripts/submit_full_pipeline.sh
+YOLO_CONFIDENCE=0.25 bash scripts/submit_full_pipeline.sh
 ```
 
-Full-run outputs are written to `outputs/part_i/b1_full/`, `outputs/part_i/b2_full/`, `outputs/part_i/b3_full/`, `outputs/part_ii/b/yolo_runs/`, and `outputs/part_ii/c_yolo/`. Refresh the report metrics after these jobs finish.
+Full-run outputs are written to `outputs/part_i/b1_full/`,
+`outputs/part_i/b2_full/`, `outputs/part_i/b3_full/`,
+`outputs/part_ii/b/yolo_runs/`, and `outputs/part_ii/c_yolo/`.
 
 ## Report
 
-The LaTeX report draft is in `report/main.tex`. It covers all coursework sections, and uses `\IfFileExists` so it compiles before and after generating the
-figures.
+The LaTeX report source is in `report/main.tex`; the submission PDF is
+`report/main.pdf`.
 
 ## Tests
 

@@ -22,6 +22,7 @@ YOLO_MODEL="${YOLO_MODEL:-yolo11n-seg.pt}"
 YOLO_EPOCHS="${YOLO_EPOCHS:-100}"
 YOLO_IMGSZ="${YOLO_IMGSZ:-640}"
 YOLO_DEVICE="${YOLO_DEVICE:-0}"
+YOLO_CONFIDENCE="${YOLO_CONFIDENCE:-0.25}"
 
 B_TIME="${B_TIME:-02:00:00}"
 YOLO_TIME="${YOLO_TIME:-02:00:00}"
@@ -63,7 +64,7 @@ echo "B(iii) full job: ${b3_job}"
 yolo_job=$(submit_gpu_dep a8_yolo_train "${YOLO_TIME}" "${b3_job}"   "${PYTHON_CMD}" scripts/train_yolo.py   --yolo-dataset-dir outputs/part_ii/b/yolo_dataset   --output-dir outputs/part_ii/b/yolo_runs   --model "${YOLO_MODEL}"   --epochs "${YOLO_EPOCHS}"   --imgsz "${YOLO_IMGSZ}"   --device "${YOLO_DEVICE}")
 echo "YOLO train job: ${yolo_job}"
 
-segment_job=$(submit_gpu_dep a8_yolo_segment "${SEGMENT_TIME}" "${yolo_job}"   "${PYTHON_CMD}" scripts/run_yolo_sequence.py   --model-path "$(pwd)/outputs/part_ii/b/yolo_runs/cells/weights/best.pt"   --data-dir "${A8_DATA_DIR}"   --sequence 01   --output-dir outputs/part_ii/c/labels_yolo)
+segment_job=$(submit_gpu_dep a8_yolo_segment "${SEGMENT_TIME}" "${yolo_job}"   "${PYTHON_CMD}" scripts/run_yolo_sequence.py   --model-path "$(pwd)/outputs/part_ii/b/yolo_runs/cells/weights/best.pt"   --data-dir "${A8_DATA_DIR}"   --sequence 01   --output-dir outputs/part_ii/c/labels_yolo   --confidence "${YOLO_CONFIDENCE}")
 echo "YOLO sequence segmentation job: ${segment_job}"
 
 track_job=$(submit_gpu_dep a8_track "${TRACK_TIME}" "${segment_job}"   "${PYTHON_CMD}" scripts/run_tracking.py   --labels-dir outputs/part_ii/c/labels_yolo   --first-frame-path "${A8_DATA_DIR}/PhC-C2DH-U373/01/t000.tif"   --output-dir outputs/part_ii/c_yolo)
