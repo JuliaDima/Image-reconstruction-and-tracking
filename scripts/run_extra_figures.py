@@ -125,11 +125,41 @@ def save_error_maps(output_path: Path) -> None:
     plt.close(fig)
 
 
+def save_confusion_matrix(output_path: Path) -> None:
+    """Re-plot the YOLO validation normalised confusion matrix for legibility.
+
+    The values are the normalised confusion matrix written by Ultralytics for the
+    validation split at the 0.25 inference threshold
+    (``runs/segment/val/confusion_matrix_normalized.png``); they are re-plotted
+    here with larger fonts and a tight layout for the report.
+    """
+
+    matrix = np.array([[0.18, 1.00], [0.82, 0.00]])
+    labels = ["cell", "background"]
+    fig, axis = plt.subplots(figsize=(5.2, 4.4), constrained_layout=True)
+    image = axis.imshow(matrix, cmap="Blues", vmin=0.0, vmax=1.0)
+    axis.set_xticks([0, 1], labels=labels, fontsize=13)
+    axis.set_yticks([0, 1], labels=labels, fontsize=13)
+    axis.set_xlabel("True class", fontsize=14)
+    axis.set_ylabel("Predicted class", fontsize=14)
+    axis.set_title("Normalised confusion matrix (conf 0.25)", fontsize=13)
+    for i in range(2):
+        for j in range(2):
+            axis.text(
+                j, i, f"{matrix[i, j]:.2f}", ha="center", va="center",
+                fontsize=18, color="white" if matrix[i, j] > 0.5 else "black",
+            )
+    fig.colorbar(image, ax=axis, fraction=0.046)
+    fig.savefig(output_path, dpi=200)
+    plt.close(fig)
+
+
 def main() -> int:
     out_dir = REPO_ROOT / "outputs" / "extra"
     out_dir.mkdir(parents=True, exist_ok=True)
     save_psf_mtf(out_dir / "psf_mtf.png")
     save_error_maps(out_dir / "a2_error_maps.png")
+    save_confusion_matrix(out_dir / "yolo_confusion.png")
     print(f"wrote figures to {out_dir}")
     return 0
 

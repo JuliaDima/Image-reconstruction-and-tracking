@@ -538,8 +538,8 @@ For a fair qualitative test I overlay predictions on the unannotated frames
 \texttt{t000}, \texttt{t057}, and \texttt{t114}, sampling the start, middle, and
 end of sequence~01 rather than replotting frames the model was trained on. These
 frames return only two, three, and two masks despite further visible cell-like
-objects (Figure~\ref{fig:yolo}(d)), and the validation prediction batch in
-Figure~\ref{fig:yolo}(e) shows the same pattern of confident but incomplete
+objects (Figure~\ref{fig:yolopred}), and the validation prediction batch in
+Figure~\ref{fig:yoloval} shows the same pattern of confident but incomplete
 detection. The normalised confusion matrix in Figure~\ref{fig:yolo}(c)
 quantifies this: at the inference threshold of \(0.25\) only \(0.18\) of the true
 cells are recovered while \(0.82\) are assigned to background. The favourable
@@ -549,37 +549,45 @@ operating point. Boundaries of the detected large cells are plausible, but recal
 is poor for smaller, brighter, and partial cells, a limitation traceable to the
 sparse annotations on only \(19\) frames.
 
-\begin{figure}[H]
+\begin{figure}[htbp]
   \centering
-  \begin{subfigure}{0.3\linewidth}
+  \begin{subfigure}[b]{0.52\linewidth}
     \centering
     \includegraphics[width=\linewidth]{yolo_verify.png}
-    \caption{Export round-trip.}
-  \end{subfigure}\hfill
-  \begin{subfigure}{0.34\linewidth}
+    \caption{Export round-trip: rasterised polygons overlaid on a training frame.}
+  \end{subfigure}
+  \\[0.7em]
+  \begin{subfigure}[b]{0.5\linewidth}
     \centering
     \includegraphics[width=\linewidth]{yolo_pr_curve.png}
-    \caption{Mask PR curve.}
+    \caption{Mask precision--recall curve.}
   \end{subfigure}\hfill
-  \begin{subfigure}{0.3\linewidth}
+  \begin{subfigure}[b]{0.47\linewidth}
     \centering
     \includegraphics[width=\linewidth]{yolo_confusion.png}
-    \caption{Confusion matrix.}
+    \caption{Normalised confusion matrix.}
   \end{subfigure}
-  \\[0.4em]
-  \begin{subfigure}{0.62\linewidth}
-    \centering
-    \includegraphics[width=\linewidth]{yolo_predictions.png}
-    \caption{Predictions on unannotated \texttt{t000}, \texttt{t057}, \texttt{t114}.}
-  \end{subfigure}\hfill
-  \begin{subfigure}{0.36\linewidth}
-    \centering
-    \includegraphics[width=\linewidth]{yolo_val_pred.jpg}
-    \caption{Validation predictions.}
-  \end{subfigure}
-  \caption{Part~II.B YOLO segmentation. The high precision and the missed cells
-  in (c)--(e) are two faces of the same operating point.}
+  \caption{Part~II.B YOLO segmentation: export verification (top) and validation
+  metrics (bottom). The high precision in (b) and the missed cells in (c) are two
+  faces of the same operating point.}
   \label{fig:yolo}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{yolo_predictions.png}
+  \caption{Predictions overlaid on the unannotated sequence-01 frames
+  \texttt{t000}, \texttt{t057}, and \texttt{t114}. Several visible cells are
+  missed at the \(0.25\) confidence threshold.}
+  \label{fig:yolopred}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.92\linewidth]{yolo_val_pred.jpg}
+  \caption{Predictions on the validation split. Detections are confident but
+  sparse, the same incomplete-recall pattern seen on sequence~01.}
+  \label{fig:yoloval}
 \end{figure}
 
 \subsection{C. Cell tracking}
