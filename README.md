@@ -2,6 +2,8 @@
 
 [![pipeline status](https://gitlab.developers.cam.ac.uk/phy/data-intensive-science-mphil/assessments/a8_coursework/eid23/badges/main/pipeline.svg)](https://gitlab.developers.cam.ac.uk/phy/data-intensive-science-mphil/assessments/a8_coursework/eid23/-/commits/main)
 
+** [The coursework report (report.pdf)](report.pdf)**
+
 This repository contains the coursework implementation for the MPhil in Data
 Intensive Science image analysis assignment.
 
@@ -259,7 +261,7 @@ python scripts/run_extra_figures.py
 ## Report
 
 The LaTeX report source is in `report/main.tex`; the submission PDF is
-`report/main.pdf`. All figures it uses are committed under `report/figures/`, so
+[`report/main.pdf`](report/main.pdf) (a copy is also available at the repository root as [`report.pdf`](report.pdf)). All figures it uses are committed under `report/figures/`, so
 the report rebuilds from a clean clone with `pdflatex main.tex` (run twice to
 resolve references).
 
