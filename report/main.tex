@@ -569,7 +569,7 @@ sparse annotations on only \(19\) frames.
   \end{subfigure}
   \caption{Part~II.B YOLO segmentation: export verification (top) and validation
   metrics (bottom). The high precision in (b) and the missed cells in (c) are two
-  faces of the same operating point.}
+  faces of the same operating point. Note that the default 0.25 confidence threshold suppresses 82\% of valid cell detections (hence the high false negative rate). The 1.00 value for predicted cells in the background column is an Ultralytics artifact: true negatives are uncounted, so the remaining false positives trivially normalize to 1.00.}
   \label{fig:yolo}
 \end{figure}
 
