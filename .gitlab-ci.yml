@@ -18,10 +18,7 @@ cache:
 tests:
   stage: test
   before_script:
-    - python -m pip install --upgrade pip
-    - python -m pip install -r requirements.txt
-    # pandas is the only optional dependency the test suite imports for real;
-    # laptrack and ultralytics are stubbed in the tests, so they are not needed.
-    - python -m pip install pandas
+    - export PATH="/home/eid23/miniforge3/envs/p28_py311_env/bin:$PATH"
+    - export PYTHONNOUSERSITE=1
   script:
     - python -m pytest -q
