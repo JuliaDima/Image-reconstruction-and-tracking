@@ -20,5 +20,8 @@ tests:
   before_script:
     - python -m pip install --upgrade pip
     - python -m pip install -r requirements.txt
+    # pandas is the only optional dependency the test suite imports for real;
+    # laptrack and ultralytics are stubbed in the tests, so they are not needed.
+    - python -m pip install pandas
   script:
     - python -m pytest -q

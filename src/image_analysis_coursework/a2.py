@@ -273,8 +273,6 @@ def run_a2_from_image(
 
 
 def _save_restoration_comparison(result: ClassicalRestorationResult, output_path: Path) -> None:
-    n_cols = 3 + len(result.tv_results)
-    fig, axes = plt.subplots(1, n_cols, figsize=(4 * n_cols, 4), constrained_layout=True)
     panels = [
         ("Ground truth", result.acquisition.ground_truth),
         (f"Blurred + noise\nPSNR {result.noisy_psnr:.2f}", result.acquisition.blurred_noisy),
@@ -284,12 +282,25 @@ def _save_restoration_comparison(result: ClassicalRestorationResult, output_path
         (f"TV $\\lambda={tv_result.lambda_value:g}$\nPSNR {tv_result.psnr:.2f}", tv_result.restored)
         for tv_result in result.tv_results
     )
+    _save_image_grid(panels, output_path)
 
-    for axis, (title, image) in zip(np.atleast_1d(axes), panels, strict=True):
+
+def _save_image_grid(panels: list[tuple[str, np.ndarray]], output_path: Path, max_cols: int = 3) -> None:
+    """Lay panels out on a grid with at most ``max_cols`` columns per row."""
+
+    n_panels = len(panels)
+    n_cols = min(max_cols, n_panels)
+    n_rows = (n_panels + n_cols - 1) // n_cols
+    fig, axes = plt.subplots(
+        n_rows, n_cols, figsize=(4.6 * n_cols, 4.0 * n_rows), constrained_layout=True
+    )
+    flat_axes = np.atleast_1d(axes).ravel()
+    for axis, (title, image) in zip(flat_axes, panels, strict=False):
         axis.imshow(image, cmap="gray", vmin=0.0, vmax=1.0)
         axis.set_title(title)
         axis.axis("off")
-
+    for axis in flat_axes[n_panels:]:
+        axis.axis("off")
     fig.savefig(output_path, dpi=200)
     plt.close(fig)
 

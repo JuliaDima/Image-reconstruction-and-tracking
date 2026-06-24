@@ -1,371 +1,659 @@
 \documentclass[11pt,a4paper]{article}
 
-\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage[a4paper,margin=2.4cm]{geometry}
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{graphicx}
-\usepackage{hyperref}
+\usepackage{subcaption}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage[font=small,labelfont=bf]{caption}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,backgrounds}
+\usepackage{xcolor}
 \usepackage{microtype}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=blue!55!black,citecolor=blue!55!black,urlcolor=blue!55!black}
+\graphicspath{{figures/}}
 \raggedbottom
 
-\title{Image Analysis Coursework Report}
-\author{eid23}
-\date{MPhil in Data Intensive Science\\Submission: 24 June 2026}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+
+\title{\vspace{-1.2cm}Image Analysis Coursework Report}
+\author{Elisabeta-Iulia (Julia) Dima \quad [eid23]}
+\date{MPhil in Data Intensive Science \\ Submission: 24 June 2026}
 
 \begin{document}
 \maketitle
+\vspace{-0.6cm}
+
+\noindent
+The two parts of this coursework address complementary questions about the
+same class of phase-contrast microscopy data, a sequence of Glioblastoma
+astrocytoma U373 cells acquired at fifteen-minute intervals with a pixel size
+of \(0.65\,\mu\)m. Part~I treats the recovery of a clean image from a
+diffraction-limited and noisy measurement, first with a classical variational
+estimator and then with a learned unrolled solver. Part~II estimates where
+motion occurs inside the field of view, localises the cells with a trained
+segmentation network, and links the resulting detections into trajectories.
+Throughout, I separate the mathematical model, the discretisation, and the
+empirical behaviour, and I report the quantitative evidence that supports each
+claim. All numbers quoted below are read directly from the metadata written by
+the pipeline, so the report and the code remain consistent.
 
 \section{Part I: Inverse Problems in Imaging}
 
-\subsection{A.1 Forward Problem: Simulating Image Acquisition}
+\subsection{A.1 Forward problem: simulating image acquisition}
 
-The first stage models the acquisition process for a diffraction-limited optical
-instrument. Starting from a clean microscopy image \(g \in \mathbb{R}^{m \times n}\),
-the observed image is generated as
+The acquisition of a diffraction-limited instrument is modelled as a linear
+forward operator followed by additive noise,
 \begin{equation}
-    f = H g + w,
+  f = Hg + w, \qquad w \sim \mathcal{N}(0,\sigma_n^2 I),
 \end{equation}
-where \(H\) is a point-spread-function blur operator and \(w\) is additive
-Gaussian noise. The implementation normalises the selected TIFF frame to
-floating point intensities in \([0,1]\), applies a Gaussian PSF with standard
-deviation \(\sigma = 2.0\), and then adds zero-mean Gaussian noise with
-\(\sigma_n = 0.001\). The random number generator is seeded with 42 by default,
-so the simulated acquisition is reproducible.
+where \(g\in\mathbb{R}^{m\times n}\) is the unknown clean image, \(H\) is a
+convolution with the point-spread function (PSF), and \(f\) is the recorded
+frame. The optical blur is modelled by a Gaussian PSF of standard deviation
+\(\sigma=2.0\). A clean TIFF frame is loaded, cast to floating point, and
+rescaled to \([0,1]\) by an affine min--max map so that the noise level and the
+regularisation parameters have a consistent meaning across frames. The blur is
+applied with \texttt{skimage.filters.gaussian}, additive zero-mean Gaussian
+noise with \(\sigma_n=0.001\) is drawn from a generator seeded at \(42\), and
+the result is clipped to the valid intensity range. Seeding makes the simulated
+measurement reproducible, which matters when the same acquisition feeds the
+restoration experiments.
 
-The default command downloads the PhC-C2DH-U373 microscopy dataset, selects the
-first sorted frame from sequence 01 as the ground truth image, and writes the
-ground truth, blurred image, blurred noisy image, comparison figure, and metadata
-to \texttt{outputs/part\_i/a1/}.
+Representing the blur by its modulation transfer function (MTF), the radially
+averaged magnitude of the Fourier transform of the PSF, clarifies what the
+inverse problem must undo. The MTF of the \(\sigma=2.0\) kernel falls to half
+of its peak at roughly \(0.090\) cycles per pixel, equivalent to a period of
+about \(11\) pixels or \(7.2\,\mu\)m at this pixel size
+(Figure~\ref{fig:psf}). Structures finer than this scale are strongly
+attenuated, so their recovery depends almost entirely on the prior rather than
+on the data. The same observation explains why naive inversion is unstable, as
+the normal operator \(H^\top H\) has very small singular values at high spatial
+frequency, and dividing by them amplifies noise. This motivates the
+regularised estimators that follow.
 
-\begin{figure}[htbp]
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}{\linewidth}
     \centering
-    \IfFileExists{../outputs/part_i/a1/comparison.png}{%
-        \includegraphics[width=\linewidth]{../outputs/part_i/a1/comparison.png}
-    }{%
-        \fbox{\parbox{0.9\linewidth}{%
-            Part I.A.1 figure generated by \texttt{python scripts/run\_a1.py}.
-        }}
-    }
-    \caption{Forward acquisition simulation: clean ground truth, Gaussian-blurred
-    image, and blurred image with additive Gaussian noise.}
-    \label{fig:a1-forward}
+    \includegraphics[width=0.93\linewidth]{a1_comparison.png}
+    \caption{Clean ground truth, Gaussian blur with \(\sigma=2\), and the
+    blurred frame with additive noise (\(\sigma_n=0.001\)).}
+  \end{subfigure}
+  \\[0.4em]
+  \begin{subfigure}{\linewidth}
+    \centering
+    \includegraphics[width=0.93\linewidth]{psf_mtf.png}
+    \caption{The Gaussian PSF, its central profile, and its modulation transfer
+    function. The half-power frequency sets the effective resolution limit.}
+  \end{subfigure}
+  \caption{Part~I.A.1 forward model. The PSF removes high spatial frequencies
+  long before the small additive noise becomes visible, which is the regime in
+  which the restoration in A.2 operates.}
+  \label{fig:psf}
 \end{figure}
 
-\subsection{A.2 Classical Image Restoration}
+\subsection{A.2 Classical image restoration}
 
-The second stage treats the simulated observation from Part I.A.1 as the input
-for classical restoration. I implemented isotropic total variation denoising by
-approximately solving
+The classical estimator solves the Rudin--Osher--Fatemi total variation
+denoising problem stated in the brief,
 \begin{equation}
-    \min_g \frac{1}{2}\lVert g - f \rVert_2^2 + \lambda\,\mathrm{TV}(g),
+  \min_{g}\; \tfrac12\norm{g-f}_2^2 + \lambda\,\mathrm{TV}(g),
+  \qquad
+  \mathrm{TV}(g)=\sum_{x,y}\sqrt{(D_xg)^2+(D_yg)^2},
+  \label{eq:rof}
 \end{equation}
-where the discrete TV term is computed from forward finite differences in the
-horizontal and vertical directions. The optimisation is solved with a
-Chambolle--Pock primal-dual method~\cite{chambollepock}. The dual variables are projected onto the
-pointwise \(\ell_2\) ball of radius \(\lambda\), and the objective value is
-recorded after each iteration.
+with \(D_x,D_y\) the forward horizontal and vertical difference operators under
+Neumann boundary conditions. The discrete divergence is implemented as the
+exact negative adjoint of this gradient, so that the primal and dual updates are
+consistent. I solve \eqref{eq:rof} with the Chambolle--Pock first-order
+primal--dual method~\cite{chambollepock}, which handles the non-smooth isotropic
+TV term exactly through the proximal operator of its convex conjugate. That
+proximal operator is the Euclidean projection of the dual field onto the
+pointwise \(\ell_2\) ball of radius \(\lambda\), which is the step that couples
+the regularisation strength into the iteration. The scheme is summarised in
+Algorithm~\ref{alg:cp}. With the gradient operator norm bounded by
+\(\norm{\nabla}\le\sqrt{8}\), the step sizes \(\tau=\sigma=0.25\) satisfy the
+convergence condition \(\tau\sigma\norm{\nabla}^2<1\).
 
-I evaluate three regularisation strengths by default:
-\(\lambda=0.001\), \(\lambda=0.01\), and \(\lambda=0.08\). These are intended to
-represent under-regularisation, a moderate compromise, and over-regularisation.
-Small \(\lambda\) values keep the solution close to the measured image, so fine
-texture and noise are both retained. Larger \(\lambda\) values suppress noise
-more aggressively but can flatten subtle structures. On the default frame, the
-noisy blurred observation gives PSNR 33.91 dB and SSIM 0.9219. A Gaussian filter
-with \(\sigma=1\) gives PSNR 33.35 dB and SSIM 0.9154, while TV denoising gives
-PSNR/SSIM values of 33.86/0.9201, 33.50/0.9094, and 31.90/0.8848 for
-\(\lambda=0.001\), \(0.01\), and \(0.08\), respectively. These values show that
-the strongest regularisation is over-smoothing this example. TV regularisation
-tends to preserve edges better than a standard Gaussian filter because the
-penalty is on the magnitude of the image gradient rather than on local averaging
-itself; sharp transitions can remain when they are supported by the data
-fidelity term. Here the input noise is already very small, so every additional
-smoothing operation reduces PSNR. Moreover, the stated A.2 objective contains
-no forward operator \(H\): it is a denoising model and cannot invert the
-Gaussian blur. Thus \(\lambda=0.001\) is best numerically, while \(0.01\)
-illustrates a stronger visual noise/detail compromise rather than genuine
-deconvolution.
+\begin{algorithm}[H]
+\caption{Chambolle--Pock TV denoising for problem~\eqref{eq:rof}}
+\label{alg:cp}
+\begin{algorithmic}[1]
+\REQUIRE observation \(f\), parameter \(\lambda\), steps \(\tau,\sigma\), relaxation \(\theta=1\)
+\STATE \(x \leftarrow f\), \quad \(\bar x \leftarrow f\), \quad dual field \(p \leftarrow 0\)
+\FOR{\(k=1\) to \(N\)}
+  \STATE \(p \leftarrow p + \sigma\,\nabla \bar x\) \hfill (dual ascent)
+  \STATE \(p \leftarrow p / \max\!\big(1,\, |p|/\lambda\big)\) \hfill (projection onto the \(\ell_2\) ball of radius \(\lambda\))
+  \STATE \(x^{+} \leftarrow \big(x + \tau\,\mathrm{div}\,p + \tau f\big)/(1+\tau)\), \quad clip to \([0,1]\)
+  \STATE \(\bar x \leftarrow x^{+} + \theta\,(x^{+}-x)\), \quad \(x \leftarrow x^{+}\)
+\ENDFOR
+\STATE \textbf{return} \(x\)
+\end{algorithmic}
+\end{algorithm}
+
+\paragraph{(i) Effect of the regularisation parameter.}
+Three values of \(\lambda\) probe the under-regularised, balanced, and
+over-regularised regimes. Small \(\lambda\) keeps the estimate close to the
+measurement, so fine texture survives together with the residual noise, while
+large \(\lambda\) drives the gradient field toward zero and flattens genuine
+structure. The quantities in Table~\ref{tab:a2} show that on this frame the
+weakest setting is numerically best and the strongest clearly over-smooths.
+The reason is specific to this acquisition: the additive noise is very small
+(\(\sigma_n=0.001\)), so the dominant error in \(f\) is the blur, and every
+smoothing operation, including TV, can only remove information that the data
+term is trying to keep. The error maps in Figure~\ref{fig:a2err} make this
+concrete, as the reconstruction error is concentrated on cell boundaries for
+all methods and changes only marginally between them. Critically, the
+objective~\eqref{eq:rof} contains no forward operator \(H\); it is a denoising
+model and cannot invert the Gaussian blur. The role of A.2 is therefore to
+illustrate the noise-versus-detail trade-off rather than to deconvolve, which is
+exactly the gap that the learned operator-aware model in Part~I.B closes.
+
+\begin{table}[H]
+  \centering
+  \caption{Part~I.A.2 restoration quality against the clean ground truth on the
+  default frame. PSNR in dB, SSIM dimensionless. The TV objective is monitored
+  for \(100\) primal--dual iterations.}
+  \label{tab:a2}
+  \begin{tabular}{lcccc}
+    \toprule
+    Method & PSNR & SSIM & initial obj. & final obj. \\
+    \midrule
+    Blurred + noise (input)        & 33.91 & 0.9219 & --      & --      \\
+    Gaussian filter \(\sigma=1\)   & 33.35 & 0.9154 & --      & --      \\
+    TV, \(\lambda=0.001\)          & \textbf{33.86} & \textbf{0.9201} & 1.75   & 1.54    \\
+    TV, \(\lambda=0.01\)           & 33.50 & 0.9094 & 17.50  & 12.84   \\
+    TV, \(\lambda=0.08\)           & 31.90 & 0.8848 & 140.01 & 77.84   \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{(ii) Why TV preserves edges better than a Gaussian filter.}
+A Gaussian filter is a linear low-pass operator that attenuates all high spatial
+frequencies. Edges are broadband features, so they are smeared in proportion to
+the kernel width regardless of their contrast. The TV penalty instead measures
+the \(\ell_1\) norm of the gradient magnitude. Because this norm grows only
+linearly with the height of a jump, a single sharp edge and a gradual ramp of
+the same total amplitude incur the same penalty, and the data fidelity term is
+free to retain the edge wherever the measurement supports it. The penalty does
+suppress the small-amplitude oscillations that constitute noise, so TV removes
+noise while keeping discontinuities, producing the characteristic piecewise
+smooth reconstructions. In the present low-noise regime this advantage is muted,
+which Table~\ref{tab:a2} reflects honestly.
+
+\paragraph{(iii) Convergence of the objective.}
+For each \(\lambda\) the objective value is recorded after every iteration
+(Figure~\ref{fig:a2}(b)). The traces decrease monotonically and flatten,
+which is the expected behaviour of a convergent primal--dual scheme on a convex
+problem. The decrease is largest in the first few iterations and the residual
+clipping to \([0,1]\) does not destabilise it. The larger \(\lambda\) starts
+from a much higher objective because the TV term is weighted more heavily, yet
+its relative reduction over the run is comparable, confirming that the solver is
+approaching the minimiser of \eqref{eq:rof} rather than stalling.
 
 \begin{figure}[htbp]
+  \centering
+  \begin{subfigure}{\linewidth}
     \centering
-    \IfFileExists{../outputs/part_i/a2/comparison.png}{%
-        \includegraphics[width=\linewidth]{../outputs/part_i/a2/comparison.png}
-    }{%
-        \fbox{\parbox{0.9\linewidth}{%
-            Part I.A.2 figure generated by \texttt{python scripts/run\_a2.py}.
-        }}
-    }
-    \caption{Classical restoration comparison for the noisy blurred input,
-    Gaussian filtering, and TV denoising at several regularisation strengths.}
-    \label{fig:a2-restoration}
+    \includegraphics[width=\linewidth]{a2_comparison.png}
+    \caption{Restorations: ground truth, the noisy input, the Gaussian baseline,
+    and TV denoising at three regularisation strengths.}
+  \end{subfigure}
+  \\[0.6em]
+  \begin{subfigure}{0.62\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{a2_objective.png}
+    \caption{The monitored TV objective for the three settings.}
+  \end{subfigure}
+  \caption{Part~I.A.2 classical restoration: restorations and objective.}
+  \label{fig:a2}
 \end{figure}
 
 \begin{figure}[htbp]
-    \centering
-    \IfFileExists{../outputs/part_i/a2/objective.png}{%
-        \includegraphics[width=0.75\linewidth]{../outputs/part_i/a2/objective.png}
-    }{%
-        \fbox{\parbox{0.75\linewidth}{%
-            Part I.A.2 objective trace generated by \texttt{python scripts/run\_a2.py}.
-        }}
-    }
-    \caption{Objective value during the TV denoising iterations. A decreasing
-    trace indicates that the iterative solver is moving toward a minimiser of
-    the regularised objective.}
-    \label{fig:a2-objective}
+  \centering
+  \includegraphics[width=\linewidth]{a2_error_maps.png}
+  \caption{Absolute reconstruction error against the ground truth for each
+  method. The error sits on cell boundaries throughout, confirming that the
+  residual blur, not the noise, limits this denoising-only model.}
+  \label{fig:a2err}
 \end{figure}
 
-\subsection{B(i) Algorithm Unrolling}
+\subsection{B. Data-driven regularisation by algorithm unrolling}
 
-For the data-driven reconstruction experiment, I implemented a learned unrolled
-proximal-gradient network. The forward operator \(H\) is a Gaussian blur with an
-\(11\times 11\) kernel and standard deviation \(2.0\). Training observations are
-simulated as \(f = Hg + w\), with white Gaussian noise of variance \(0.001\). The
-network uses \(K=6\) unrolled iterations by default:
+The data-driven model replaces the hand-chosen TV prior with a learned proximal
+map and accounts explicitly for the blur. Proximal gradient descent on the
+operator-aware objective \(\tfrac12\norm{Hg-f}_2^2 + R_\gamma(g)\) alternates a
+gradient step on the data term with the proximal operator of the regulariser.
+Unrolling truncates this iteration to \(K\) steps and replaces each proximal
+operator by a small convolutional network, turning the solver into a trainable
+feed-forward architecture,
 \begin{equation}
-    g^{(k+1)} = \phi_{\theta^{(k)}}\left(g^{(k)} - \eta^{(k)}H^\top(Hg^{(k)} - f)\right),
+  g^{(k+1)} = \varphi_{\theta^{(k)}}\!\Big(g^{(k)} - \eta^{(k)} H^\top\big(Hg^{(k)}-f\big)\Big),
+  \qquad 0\le k\le K-1.
+  \label{eq:unroll}
 \end{equation}
-where each \(\phi_{\theta^{(k)}}\) is a small CNN proximal map with two hidden
-convolutional layers and PReLU activations. The step sizes are learned as
-unconstrained parameters passed through a softplus transform, which keeps
-\(\eta^{(k)}\geq 0\) during training. The training loss is the \(\ell_1\) error
-between the final reconstruction \(g^{(K)}\) and the clean reference image.
-Training uses random crops and random horizontal/vertical flips from sequence 01;
-sequence 02 is used for test metrics.
+I use \(K=6\). The blur \(H\) and its adjoint are implemented as a depthwise
+convolution with a normalised Gaussian kernel; because the kernel is symmetric,
+\(H^\top\) is the same padded convolution, which makes the data-term gradient
+exact. Each \(\varphi_{\theta^{(k)}}\) is a three-layer residual CNN with two
+PReLU activations and \(32\) feature channels, and the step sizes are kept
+non-negative by the parameterisation \(\eta^{(k)}=\mathrm{softplus}(\beta^{(k)})\)
+with learnable \(\beta^{(k)}\). The architecture is shown in
+Figure~\ref{fig:arch} and the forward and training passes in
+Algorithm~\ref{alg:unroll}. The network is trained by minimising the
+\(\ell_1\) loss between the final iterate \(g^{(K)}\) and the clean reference,
+using \(128\times128\) random crops with random horizontal and vertical flips
+drawn from sequence~01, which compensates for the small number of training
+images, while sequence~02 supplies the test metrics. Observations are generated
+on the fly as \(f=Hg+w\) with noise variance \(0.001\).
 
-The full GPU run used 50 epochs, 32 feature channels, batch size 4,
-\(128\times128\) crops and learning rate \(10^{-4}\). On all 115 images in
-sequence 02, the degraded input scored PSNR 28.18 dB and SSIM 0.4897, while the
-unrolled reconstruction improved this to PSNR 34.10 dB and SSIM 0.9113.
-
-\begin{figure}[htbp]
-    \centering
-    \IfFileExists{../outputs/part_i/b1_full/comparison.png}{%
-        \includegraphics[width=\linewidth]{../outputs/part_i/b1_full/comparison.png}
-    }{%
-        \fbox{\parbox{0.9\linewidth}{%
-            Part I.B(i) comparison generated by \texttt{python scripts/run\_b1.py}.
-        }}
-    }
-    \caption{Visual comparison for the unrolled PGD model: ground truth, blurred
-    noisy input, and learned reconstruction.}
-    \label{fig:b1-unrolling}
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+      font=\small,
+      box/.style={draw,rounded corners,minimum height=8mm,minimum width=12mm,align=center},
+      op/.style={draw,circle,inner sep=1pt,minimum size=6mm},
+      >=Latex,node distance=6mm and 8mm]
+    \node (f) {\(f\)};
+    \node[box,right=of f] (at0) {\(H^\top\)};
+    \node[right=5mm of at0] (xk) {\(g^{(k)}\)};
+    \node[box,right=of xk] (A) {\(H\)};
+    \node[op,right=of A] (sub) {\(-\)};
+    \node[box,right=of sub] (AT) {\(H^\top\)};
+    \node[op,right=of AT] (eta) {\(\eta^{(k)}\)};
+    \node[op,right=of eta] (sub2) {\(-\)};
+    \node[box,right=of sub2,fill=blue!8] (prox) {\(\varphi_{\theta^{(k)}}\)\\CNN};
+    \node[box,right=4mm of prox] (clamp) {clip};
+    \node[right=5mm of clamp] (xk1) {\(g^{(k+1)}\)};
+    \draw[->] (f) -- (at0);
+    \draw[->] (at0) -- (xk);
+    \draw[->] (xk) -- (A);
+    \draw[->] (A) -- (sub);
+    \draw[->] (sub) -- (AT);
+    \draw[->] (AT) -- (eta);
+    \draw[->] (eta) -- (sub2);
+    \draw[->] (sub2) -- (prox);
+    \draw[->] (prox) -- (clamp);
+    \draw[->] (clamp) -- (xk1);
+    \draw[->] (f) to[out=-90,in=-90] (sub.south);
+    \draw[->] (xk) to[out=90,in=90] (sub2.north);
+    \node[draw,dashed,rounded corners,fit=(A)(sub)(AT)(eta)(sub2)(prox)(clamp),inner sep=4mm,label=above:{one unrolled step, repeated \(\times K\)}] {};
+  \end{tikzpicture}
+  \\[0.5em]
+  \begin{tikzpicture}[font=\small,box/.style={draw,rounded corners,minimum height=7mm,align=center},>=Latex,node distance=5mm]
+    \node (in) {\(x\)};
+    \node[box,right=of in] (c1) {Conv 3\(\times\)3\\1\(\to\)32};
+    \node[box,right=of c1] (p1) {PReLU};
+    \node[box,right=of p1] (c2) {Conv 3\(\times\)3\\32\(\to\)32};
+    \node[box,right=of c2] (p2) {PReLU};
+    \node[box,right=of p2] (c3) {Conv 3\(\times\)3\\32\(\to\)1};
+    \node[draw,circle,inner sep=1pt,minimum size=5mm,right=of c3] (add) {\(+\)};
+    \node[right=4mm of add] (out) {\(\varphi(x)\)};
+    \draw[->] (in)--(c1); \draw[->] (c1)--(p1); \draw[->] (p1)--(c2); \draw[->] (c2)--(p2);
+    \draw[->] (p2)--(c3); \draw[->] (c3)--(add); \draw[->] (add)--(out);
+    \draw[->] (in) to[out=90,in=90] (add.north);
+  \end{tikzpicture}
+  \caption{Unrolled PGD architecture (top) and the residual proximal CNN that
+  realises \(\varphi_{\theta^{(k)}}\) (bottom). In the independent model each step
+  owns its CNN and step size; in the shared model a single CNN and a single step
+  size are reused at every step.}
+  \label{fig:arch}
 \end{figure}
 
+\begin{algorithm}[H]
+\caption{Unrolled PGD forward pass and training step}
+\label{alg:unroll}
+\begin{algorithmic}[1]
+\REQUIRE observation \(f\), operator \(H\), CNNs \(\{\varphi_{\theta^{(k)}}\}\), raw steps \(\{\beta^{(k)}\}\)
+\STATE \(g \leftarrow H^\top f\)
+\FOR{\(k=0\) to \(K-1\)}
+  \STATE \(\eta \leftarrow \mathrm{softplus}(\beta^{(k)})\) \hfill (ensures \(\eta\ge 0\))
+  \STATE \(g \leftarrow \varphi_{\theta^{(k)}}\!\big(g - \eta\,H^\top(Hg-f)\big)\), \quad clip to \([0,1]\)
+\ENDFOR
+\STATE compute \(\mathcal{L}=\norm{g-g_{\text{true}}}_1\); backpropagate; Adam update of \(\{\theta^{(k)},\beta^{(k)}\}\)
+\STATE \textbf{return} \(g\)
+\end{algorithmic}
+\end{algorithm}
 
-\subsection{B(ii) Out-of-Distribution Generalisation}
+\paragraph{(i) Matched training and testing.}
+With matched \(11\times11\), \(\sigma=2.0\) blur, the model was trained for
+\(50\) epochs at batch size \(4\) and learning rate \(10^{-4}\) on a GPU. Across
+all \(115\) test images the degraded input scores PSNR \(28.18\)\,dB and SSIM
+\(0.490\), and the reconstruction raises this to PSNR \(34.10\)\,dB and SSIM
+\(0.911\) (Figure~\ref{fig:bunroll}(a)). The six learned step sizes converge to nearly
+equal values near \(0.13\), indicating that the network settles on an almost
+constant descent step for the well-conditioned Gaussian normal operator and
+delegates the remaining work to the learned proximal maps.
 
-For the OOD experiment the same independent-layer unrolled PGD architecture is
-trained with a more severe degradation, using a Gaussian blur kernel of size
-\(21\times21\), standard deviation \(4.0\), and white Gaussian noise of variance
-\(0.001\). At test time the model is evaluated on the original Part I.B(i)
-setting, namely an \(11\times11\) Gaussian kernel with standard deviation \(2.0\)
-and the same noise variance. This isolates whether the learned proximal maps are
-robust to a forward model mismatch. The script records average PSNR and SSIM for
-both the degraded input and the reconstruction, plus a visual comparison. This
-tests whether training on stronger blur makes the learned prior robust or makes
-it overcompensate when the test blur is weaker.
+\paragraph{(ii) Out-of-distribution generalisation.}
+Retraining the same independent-step architecture on a more severe degradation
+(\(21\times21\), \(\sigma=4.0\)) and testing on the B(i) degradation isolates
+sensitivity to a forward-model mismatch. The model reaches PSNR \(33.11\)\,dB
+and SSIM \(0.903\), a drop of \(0.99\)\,dB and \(0.008\) SSIM relative to the
+matched model (Figure~\ref{fig:bunroll}(b)). The learned solver therefore does not
+fully transfer across operators despite the harder training blur. The learned
+data term is tied to the training PSF through the \(H^\top H\) gradient, so a
+test image whose blur is weaker is partially over-corrected. The degradation is
+modest rather than catastrophic because the proximal CNNs encode a generic image
+prior that remains useful, which is the practically relevant conclusion: the
+prior generalises, the geometry of the data term does not.
 
-The full OOD run achieved PSNR 33.11 dB and SSIM 0.9030 on the B(i) test
-degradation. Relative to the matched B(i) model, this is a reduction of 0.99 dB
-and 0.0083 SSIM. The learned solver is therefore sensitive to a mismatch between
-the training and test forward operators, despite training on the more severe blur.
+\paragraph{(iii) Shared parameters and convergence beyond the training depth.}
+Tying the proximal CNN and the step size across steps yields the iteration
+\(g^{(k+1)}=\psi_\theta(g^{(k)}-\eta H^\top(Hg^{(k)}-f))\), trained at \(K=6\)
+and then run for \(T=K,4K,8K,16K\) on one test image (Table~\ref{tab:b3},
+Figure~\ref{fig:b3}). PSNR collapses from \(33.61\)\,dB at \(T=6\) to
+\(6.56\)\,dB at \(T=96\). The learned map is optimised to reach a good image in
+exactly six steps, not to be a contraction with the clean image as its fixed
+point. Past the trained depth, the proximal CNN keeps removing what it treats as
+residual structure, eroding genuine detail, and the iterates drift away. The
+result shows that a finite-depth unrolled network should be read as a learned
+\(K\)-step estimator rather than as a convergent optimisation algorithm, which is
+the central caveat of the unrolling approach.
+
+\begin{table}[H]
+  \centering
+  \caption{Part~I.B(iii) shared-parameter reconstruction quality on one test
+  image as the trained six-step update is iterated to depth \(T\).}
+  \label{tab:b3}
+  \begin{tabular}{lcccc}
+    \toprule
+    \(T\) & 6 & 24 & 48 & 96 \\
+    \midrule
+    PSNR (dB) & 33.61 & 23.88 & 18.05 & 6.56 \\
+    SSIM      & 0.905 & 0.828 & 0.577 & 0.007 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
 
 \begin{figure}[htbp]
+  \centering
+  \begin{subfigure}{0.9\linewidth}
     \centering
-    \IfFileExists{../outputs/part_i/b2_full/comparison.png}{%
-        \includegraphics[width=\linewidth]{../outputs/part_i/b2_full/comparison.png}
-    }{%
-        \fbox{\parbox{0.9\linewidth}{Part I.B(ii) comparison generated by \texttt{python scripts/run\_b2.py}.}}
-    }
-    \caption{Part I.B(ii) OOD unrolled PGD comparison.}
-    \label{fig:b2-ood}
+    \includegraphics[width=\linewidth]{b1_comparison.png}
+    \caption{B(i) matched model: ground truth, blurred noisy input, reconstruction.}
+  \end{subfigure}
+  \\[0.6em]
+  \begin{subfigure}{0.9\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{b2_comparison.png}
+    \caption{B(ii) out-of-distribution model evaluated on the B(i) degradation.}
+  \end{subfigure}
+  \caption{Part~I.B(i)--(ii) unrolled proximal gradient reconstructions.}
+  \label{fig:bunroll}
 \end{figure}
 
-\subsection{B(iii) Shared-Parameter Convergence}
-
-For the convergence experiment I train a shared-parameter unrolled PGD model:
-\begin{equation}
-    g^{(k+1)} = \psi_{\theta}\left(g^{(k)} - \eta H^\top(Hg^{(k)} - f)\right),
-\end{equation}
-with a single CNN proximal map and a single positive softplus-constrained step
-size reused at every layer. Training uses \(K=6\) iterations under the matched
-\(11\times11\), \(\sigma=2.0\) blur and noise variance \(0.001\). At evaluation,
-the same learned update is applied to one test image for \(T=K,4K,8K,16K\). The
-script writes a PSNR/SSIM table and a PSNR curve. The measured values are:
-
-\begin{center}
-\begin{tabular}{c|rrrr}
-\(T\) & 6 & 24 & 48 & 96 \\ \hline
-PSNR (dB) & 33.61 & 23.88 & 18.05 & 6.56 \\
-SSIM & 0.9049 & 0.8278 & 0.5773 & 0.0068
-\end{tabular}
-\end{center}
-The monotonic deterioration beyond \(K\) shows that the finite-depth training
-has not learned a globally stable fixed point. The shared update is effective
-at its trained depth but should not be interpreted as a convergent solver.
-
 \begin{figure}[htbp]
+  \centering
+  \begin{subfigure}{0.6\linewidth}
     \centering
-    \IfFileExists{../outputs/part_i/b3_full/convergence_psnr.png}{%
-        \includegraphics[width=0.7\linewidth]{../outputs/part_i/b3_full/convergence_psnr.png}
-    }{%
-        \fbox{\parbox{0.75\linewidth}{Part I.B(iii) convergence plot generated by \texttt{python scripts/run\_b3.py}.}}
-    }
-    \IfFileExists{../outputs/part_i/b3_full/comparison.png}{%
-        \includegraphics[width=\linewidth]{../outputs/part_i/b3_full/comparison.png}
-    }{}
-    \caption{Part I.B(iii) PSNR and reconstructions as the shared update is
-    iterated beyond the training depth.}
-    \label{fig:b3-convergence}
+    \includegraphics[width=\linewidth]{b3_convergence.png}
+    \caption{PSNR against the iteration depth \(T\).}
+  \end{subfigure}
+  \\[0.5em]
+  \begin{subfigure}{\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{b3_comparison.png}
+    \caption{Reconstructions at \(T=K,4K,8K,16K\), which degrade visibly beyond
+    the trained depth.}
+  \end{subfigure}
+  \caption{Part~I.B(iii) shared-parameter model iterated past its training depth.}
+  \label{fig:b3}
 \end{figure}
 
 \section{Part II: Motion Estimation and Cell Tracking}
 
-\subsection{A. Motion Estimation}
+\subsection{A. Motion estimation}
 
-\paragraph{(i) Pair and change visualisation.}
-I use consecutive sequence-01 frames \texttt{t000} and \texttt{t001}, acquired
-15 minutes apart. Both are normalised to \([0,1]\). Their absolute difference
-highlights changes at cell boundaries and within textured cell interiors while
-leaving most of the substrate dark (Figure~\ref{fig:motion-summary}).
+\paragraph{(i) Image pair and change visualisation.}
+I take the consecutive sequence-01 frames \texttt{t000} and \texttt{t001},
+acquired fifteen minutes apart, and normalise both to \([0,1]\). A simple and
+informative change map is the absolute difference \(|f_{t+1}-f_t|\), rescaled for
+display (Figure~\ref{fig:motion}, top right). It lights up cell boundaries and
+the textured interiors where intensity has shifted, while the static substrate
+stays dark, giving a first qualitative picture of where motion is concentrated
+before any flow is estimated.
 
-\paragraph{(ii--iii) Horn--Schunck implementation and test.}
-Spatial derivatives are computed from the mean of the two frames and
-\(D_t f=f_{t+1}-f_t\). Following Horn and Schunck~\cite{hornschunck}, the
-implemented Jacobi iteration uses four-neighbour averages and minimises
+\paragraph{(ii--iii) Horn--Schunck implementation and testing.}
+The Horn--Schunck estimator~\cite{hornschunck} minimises the optical-flow
+constraint together with a Tikhonov smoothness term,
 \begin{equation}
- E(u,v)=\langle(D_xfu+D_yfv+D_tf)^2\rangle+
- \alpha^2\langle|\nabla u|^2+|\nabla v|^2\rangle .
+  E(u,v)=\big\langle (D_xf\,u + D_yf\,v + D_tf)^2\big\rangle
+        + \alpha^2\big\langle |\nabla u|^2+|\nabla v|^2\big\rangle .
+  \label{eq:hs}
 \end{equation}
-Tests translate a synthetic square by one pixel in each cardinal direction.
-The estimated component has the correct sign and the orthogonal component is
-near zero; its magnitude is attenuated by smoothness and the aperture problem.
+Spatial derivatives \(D_xf,D_yf\) are taken on the average of the two frames and
+the temporal derivative is \(D_tf=f_{t+1}-f_t\). The Euler--Lagrange equations of
+\eqref{eq:hs} give the Jacobi update of Algorithm~\ref{alg:hs}, in which the
+local average \(\bar u\) is the four-neighbour mean. That mean is exactly the
+kernel \([[0,0.25,0],[0.25,0,0.25],[0,0.25,0]]\) suggested in the brief; I
+implement it with edge padding so that border pixels are handled consistently.
+The denominator \(\alpha^2+D_xf^2+D_yf^2\) is precomputed once. I verify the
+estimator on a synthetic square translated by one pixel along each axis: the
+recovered flow has the correct sign in the direction of motion and a
+near-zero orthogonal component, with the magnitude attenuated by the smoothness
+term and by the aperture problem, which is the expected qualitative behaviour
+and the basis for the unit test that guards the implementation.
+
+\begin{algorithm}[H]
+\caption{Horn--Schunck optical flow (Jacobi iteration)}
+\label{alg:hs}
+\begin{algorithmic}[1]
+\REQUIRE frames \(f_t,f_{t+1}\), regularisation \(\alpha\), iterations \(N\)
+\STATE \(D_xf,D_yf \leftarrow \nabla\big(\tfrac12(f_t+f_{t+1})\big)\); \quad \(D_tf \leftarrow f_{t+1}-f_t\)
+\STATE \(u,v \leftarrow 0\); \quad \(d \leftarrow \alpha^2 + D_xf^2 + D_yf^2\)
+\FOR{\(k=1\) to \(N\)}
+  \STATE \(\bar u,\bar v \leftarrow\) four-neighbour average of \(u,v\)
+  \STATE \(r \leftarrow (D_xf\,\bar u + D_yf\,\bar v + D_tf)/d\)
+  \STATE \(u \leftarrow \bar u - D_xf\cdot r\); \quad \(v \leftarrow \bar v - D_yf\cdot r\)
+  \STATE record \(E(u,v)\) from \eqref{eq:hs}
+\ENDFOR
+\STATE \textbf{return} \(u,v,\;\text{energy trace}\)
+\end{algorithmic}
+\end{algorithm}
 
 \paragraph{(iv) Energy.}
-For \(\alpha=1\) and 100 iterations, energy falls from
-\(1.8590\times10^{-3}\) to a minimum \(1.8395\times10^{-3}\) at iteration 49,
-then rises slightly to \(1.8416\times10^{-3}\). The Jacobi sequence is therefore
-not monotonically energy decreasing; iteration 49 is a better stopping point
-than blindly using the last iterate.
+For \(\alpha=1\) and \(100\) iterations the energy decreases from
+\(1.859\times10^{-3}\) to a minimum of \(1.840\times10^{-3}\) at iteration
+\(49\), then rises slightly to \(1.842\times10^{-3}\). The Jacobi sequence is
+therefore not monotonically energy-decreasing once it overshoots, so the
+minimum-energy iterate is a more principled stopping point than the final one.
+The dashed marker in Figure~\ref{fig:motion} indicates this iterate.
 
 \paragraph{(v) Estimated flow.}
-HSV hue encodes direction and brightness encodes magnitude. Motion is
-concentrated around phase-contrast edges and intracellular texture, while the
-background is nearly stationary. The background-inclusive mean vector is
-\((\bar u,\bar v)=(-0.0026,-0.0043)\) pixels per frame and mean magnitude is
-0.0197 pixels; arrows in Figure~\ref{fig:motion-summary} are enlarged 100 times.
+The flow is shown both as an HSV map, in which hue encodes direction and
+brightness encodes magnitude, and as a quiver overlay with vectors enlarged a
+hundredfold for visibility. Motion concentrates on phase-contrast edges and
+intracellular texture, while the background is nearly stationary. The
+background-inclusive mean vector is \((\bar u,\bar v)=(-0.0026,-0.0043)\) pixels
+per frame with mean magnitude \(0.020\) pixels, consistent with slow migration
+sampled coarsely in time.
 
-\begin{figure}[htbp]
- \centering
- \IfFileExists{../outputs/part_ii/a/motion_summary.png}{%
-  \includegraphics[width=\linewidth]{../outputs/part_ii/a/motion_summary.png}
- }{\fbox{\parbox{0.9\linewidth}{Generated by \texttt{python scripts/run\_motion.py}.}}}
- \caption{Input pair, absolute difference, HSV and quiver flow, and energy.
- The dashed line marks the minimum-energy iterate.}
- \label{fig:motion-summary}
+\paragraph{(vi) Effect of \(\alpha\) and the iteration count.}
+The sweep over \(\alpha\in\{0.3,1,3\}\) and \(\{10,50,100,200\}\) iterations in
+Figure~\ref{fig:motion} (bottom) separates the two controls. At \(100\)
+iterations the mean magnitude falls from \(0.110\) pixels at \(\alpha=0.3\) to
+\(0.020\) at \(\alpha=1\) and \(0.0026\) at \(\alpha=3\): stronger regularisation
+both suppresses and spatially smooths the field. Iterations act as a diffusion
+that propagates flow from textured regions into neighbouring pixels, but all
+settings eventually pass their measured energy minimum, so more iterations are
+not uniformly better. Together these observations motivate validating \(\alpha\)
+against a known displacement and using energy-based early stopping.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\linewidth]{motion_summary.png}
+  \\[0.3em]
+  \includegraphics[width=0.78\linewidth]{motion_sweep.png}
+  \caption{Part~II.A. Top: the input pair, absolute difference, HSV and quiver
+  flow, and the energy trace with its minimum marked. Bottom: sensitivity of the
+  final energy and the mean flow magnitude to \(\alpha\) and the iteration count.}
+  \label{fig:motion}
 \end{figure}
 
-\paragraph{(vi) Regularisation and iterations.}
-The sweep in Figure~\ref{fig:motion-sweep} compares \(\alpha=0.3\), 1 and 3.
-Iteration counts are 10, 50, 100 and 200. At 100 iterations,
-mean magnitude falls from 0.110 pixels for \(\alpha=0.3\), to 0.0197 for
-\(\alpha=1\), and 0.00257 for \(\alpha=3\): stronger regularisation suppresses
-and smooths motion. Additional iterations initially propagate motion into
-neighbouring pixels, but all settings eventually pass their measured energy
-minimum. This motivates parameter validation and energy-based stopping.
+\subsection{B. Cell detection and segmentation with YOLO}
 
-\begin{figure}[htbp]
- \centering
- \includegraphics[width=0.82\linewidth]{../outputs/part_ii/a/parameter_sweep.png}
- \caption{Sensitivity of final energy and mean flow magnitude to \(\alpha\) and
- iteration count.}
- \label{fig:motion-sweep}
-\end{figure}
+\paragraph{(i) Conversion to YOLO segmentation format.}
+The \texttt{01\_GT/SEG} and \texttt{02\_GT/SEG} label images are converted to
+the normalised-polygon format that Ultralytics expects, using sequence~01 for
+training (\(15\) frames) and sequence~02 for validation (\(19\) frames). Each
+connected component is passed through \texttt{regionprops}, its longest contour
+is extracted with \texttt{find\_contours} and simplified with
+\texttt{approximate\_polygon}, and the vertices are normalised by the image
+width and height. Padding the component before contouring avoids open contours at
+the mask border. To verify the export I rasterise the written polygons back to
+binary masks and compare them with the originals, obtaining a mean intersection
+over union of \(0.9967\) and a minimum of \(0.9769\), so the conversion is
+faithful (Figure~\ref{fig:yolo}(a)). The annotations cover only whole cell
+bodies, so the model must learn to discard phase-contrast halos around the
+cells, bright intracellular texture, small debris on the substrate, and the
+partial cells clipped at the image border.
 
-\subsection{B. YOLO Cell Segmentation}
+\paragraph{(ii) Training and validation.}
+I fine-tune the pretrained \texttt{yolo11n-seg} checkpoint, the nano
+segmentation model from Ultralytics~\cite{ultralytics}, for \(100\) epochs at
+\(640\times640\) and batch size \(16\) with GPU acceleration; the brief's
+\texttt{yolo26n-seg} is an example identifier and \texttt{yolo11n-seg} is the
+corresponding available segmentation weight. On the \(19\) validation frames the
+mask metrics are precision \(0.916\), recall \(0.895\), mAP\(_{50}\)(M)
+\(0.902\), and the requested mAP\(_{50\text{--}95}\)(M) \(0.694\). The
+precision--recall curve in Figure~\ref{fig:yolo}(b) is high and flat until recall
+approaches \(0.9\), where precision falls sharply, which is the signature of a
+detector that is accurate on the cells it finds but misses a fraction of them.
 
-\paragraph{(i) Export.}
-All 34 annotated frames are exported: 15 sequence-01 frames for training and
-19 sequence-02 frames for validation. Each labelled component is converted to
-its longest simplified contour and coordinates are normalised by image width
-and height. Rasterising the polygons back to binary masks gives mean IoU 0.9967
-and minimum IoU 0.9769. The model must distinguish whole cells from
-phase-contrast halos, intracellular texture, debris, substrate features, and
-ambiguous partial objects at image boundaries.
-
-\paragraph{(ii) Training.}
-A pretrained \texttt{yolo11n-seg.pt} model~\cite{ultralytics} was trained on a
-GPU for 100 epochs with \(640\times640\) inputs and batch size 16. On sequence
-02, segmentation mAP50--95(M) is 0.694. This estimate is based on only 19
-validation images and is not exhaustive temporal validation.
-
-\paragraph{(iii) Label-image conversion.}
-Inference polygons are filled with \texttt{draw.polygon}; each accepted polygon receives a distinct
-positive integer and background remains zero. The confidence threshold is 0.25.
+\paragraph{(iii) From predictions to a label image.}
+Inference returns one polygon per detected instance. The conversion function
+fills each polygon with \texttt{skimage.draw.polygon}, assigns it a distinct
+positive integer, and leaves the background at zero, producing an integer label
+image compatible with the downstream \texttt{regionprops} analysis. The
+confidence threshold is \(0.25\).
 
 \paragraph{(iv--v) Frame choice and quality.}
-I inspect unannotated early, middle and late frames \texttt{t000},
-\texttt{t057}, and \texttt{t114}, testing temporal coverage without simply
-replotting training annotations. Figure~\ref{fig:yolo} shows only 2, 3 and 2
-masks respectively despite additional visible cell-like objects. Boundaries of
-detected large cells are plausible, but recall is poor for smaller, brighter
-and partial cells. The validation mAP therefore masks meaningful under-detection
-on the complete sequence, likely due to sparse annotations.
+For a fair qualitative test I overlay predictions on the unannotated frames
+\texttt{t000}, \texttt{t057}, and \texttt{t114}, sampling the start, middle, and
+end of sequence~01 rather than replotting frames the model was trained on. These
+frames return only two, three, and two masks despite further visible cell-like
+objects (Figure~\ref{fig:yolo}(d)), and the validation prediction batch in
+Figure~\ref{fig:yolo}(e) shows the same pattern of confident but incomplete
+detection. The normalised confusion matrix in Figure~\ref{fig:yolo}(c)
+quantifies this: at the inference threshold of \(0.25\) only \(0.18\) of the true
+cells are recovered while \(0.82\) are assigned to background. The favourable
+validation mAP and recall, which credit low-confidence detections by sweeping the
+confidence threshold, therefore overstate the recall achievable at a fixed
+operating point. Boundaries of the detected large cells are plausible, but recall
+is poor for smaller, brighter, and partial cells, a limitation traceable to the
+sparse annotations on only \(19\) frames.
 
-\begin{figure}[htbp]
- \centering
- \IfFileExists{../outputs/part_ii/b/yolo_dataset/verify_overlay.png}{%
-  \includegraphics[width=0.28\linewidth]{../outputs/part_ii/b/yolo_dataset/verify_overlay.png}
- }{}
- \IfFileExists{../outputs/part_ii/b/prediction_montage.png}{%
-  \includegraphics[width=0.7\linewidth]{../outputs/part_ii/b/prediction_montage.png}
- }{}
- \caption{Export verification (left) and predictions on early, middle and late
- unannotated sequence-01 frames (right).}
- \label{fig:yolo}
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}{0.3\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{yolo_verify.png}
+    \caption{Export round-trip.}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.34\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{yolo_pr_curve.png}
+    \caption{Mask PR curve.}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.3\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{yolo_confusion.png}
+    \caption{Confusion matrix.}
+  \end{subfigure}
+  \\[0.4em]
+  \begin{subfigure}{0.62\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{yolo_predictions.png}
+    \caption{Predictions on unannotated \texttt{t000}, \texttt{t057}, \texttt{t114}.}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.36\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{yolo_val_pred.jpg}
+    \caption{Validation predictions.}
+  \end{subfigure}
+  \caption{Part~II.B YOLO segmentation. The high precision and the missed cells
+  in (c)--(e) are two faces of the same operating point.}
+  \label{fig:yolo}
 \end{figure}
 
-\subsection{C. Cell Tracking}
+\subsection{C. Cell tracking}
 
 \paragraph{(i) Sequence segmentation.}
-The trained model is loaded once and applied at confidence 0.25 to all 115
-sequence-01 frames. It produces 287 masks and no mask in one frame.
+The trained model is loaded once and applied at confidence \(0.25\) to all
+\(115\) frames of sequence~01, producing \(287\) masks in total with exactly one
+frame returning no mask.
 
-\paragraph{(ii) Centroids and missing information.}
-\texttt{regionprops} supplies each mask's centroid and area, but not temporal
-identity: a tracker must infer which detection in frame \(t+1\) belongs to a
-cell from frame \(t\), while handling missed, merged and split masks.
+\paragraph{(ii) Centroids and the missing information.}
+For every mask, \texttt{regionprops} supplies the centroid and area. What is
+absent is temporal identity: nothing in a single frame says which detection at
+time \(t+1\) is the same cell as a detection at time \(t\). Supplying that
+correspondence, while coping with missed, merged, and split masks, is exactly
+the job of the tracker.
 
-\paragraph{(iii) LapTrack parameters.}
-The completed run uses \texttt{LapTrack}~\cite{laptrack}, with squared Euclidean
-linking and gap-closing costs, a 35-pixel cutoff (\(35^2=1225\)), one
-missing-frame gap, and splitting/merging disabled. At 0.65 micrometres per pixel
-this permits 22.75 micrometres per 15-minute interval. It exceeds the observed
-95th-percentile and maximum linked speeds (12.0 and 24.2 pixels/frame), providing
-margin for fast cells, although a permissive cutoff can create incorrect links.
-A one-frame gap can bridge one missing mask; longer omissions terminate a track.
+\paragraph{(iii) LapTrack parameters and gap closing.}
+Tracking uses \texttt{LapTrack}~\cite{laptrack} with squared-Euclidean linking
+and gap-closing costs, a \(35\)-pixel cutoff (\(35^2=1225\) in squared distance),
+a one-frame gap, and splitting and merging disabled because the cells neither
+divide nor fuse on this timescale. At \(0.65\,\mu\)m per pixel the cutoff permits
+\(22.75\,\mu\)m of displacement per fifteen-minute interval, which exceeds the
+observed \(95\)th-percentile and maximum linked speeds of \(12.0\) and
+\(24.2\) pixels per frame and so leaves margin for the fastest cells without
+being so permissive that spurious links dominate. Gap closing is how the tracker
+compensates for missing masks: when a cell is undetected in a single frame, the
+algorithm links the detection before the gap to the one after it, bridging up to
+\texttt{max\_gap} frames; longer omissions correctly terminate the track.
 
 \paragraph{(iv) Visualisation and limitations.}
-LapTrack returns 43 tracks, with median length 3 frames, maximum length 29, and
-23 tracks lasting at most three frames (Figure~\ref{fig:tracking}). This severe
-fragmentation is consistent with YOLO under-detection and is more informative
-than the total track count alone.
+LapTrack returns \(43\) tracks with median length three frames, a maximum of
+\(29\), and \(23\) tracks lasting at most three frames
+(Figure~\ref{fig:track}). The composite shows the full trajectories on
+\texttt{t000} with start and end markers, the number of detections per frame,
+and the track-length distribution, the last of which exposes the severe
+fragmentation directly. This fragmentation is the downstream consequence of the
+YOLO under-detection documented above rather than a tracking failure: with two
+or three detections per frame, many tracks cannot persist.
 
-\begin{figure}[htbp]
- \centering
- \includegraphics[width=\linewidth]{../outputs/part_ii/c_yolo/tracking_summary.png}
- \caption{Full trajectories projected on \texttt{t000}, detections per frame,
- and track-length distribution. Circles and crosses mark starts and ends.}
- \label{fig:tracking}
+\paragraph{(v) Relating tracks to optical flow.}
+The two analyses can be combined per cell and per frame interval by averaging
+the dense Horn--Schunck flow inside each segmented mask and comparing that
+internal-motion vector with the centroid displacement of the track. The angle
+between them measures whether intracellular movement aligns with the direction of
+migration, and the two magnitudes separate internal reorganisation from bulk
+translation. Masks that are uncertain or filled by gap closing should be excluded
+or down-weighted so that the comparison reflects measured motion only.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.97\linewidth]{tracking_summary.png}
+  \caption{Part~II.C. Trajectories on \texttt{t000} (start \(\circ\), end
+  \(\times\)), detections per frame, and the track-length distribution.}
+  \label{fig:track}
 \end{figure}
 
-\paragraph{(v) Relationship to optical flow.}
-For each linked cell and frame interval, I would average the dense flow inside
-its mask and compare that internal-motion vector with the centroid displacement.
-Their angle measures alignment and their magnitudes separate intracellular
-reorganisation from whole-cell translation. Uncertain or missing masks should
-be excluded or propagated with the track model.
+\section{Software engineering}
+
+The code is an installable package under \texttt{src/image\_analysis\_coursework}
+with thin command-line entry points declared in \texttt{pyproject.toml}, which
+serves as the build manifest for a standard \texttt{setuptools} build. Each part
+of the brief maps to one module and one script, the heavy GPU runs are submitted
+through a Slurm wrapper, and all figures and metrics are written as files so the
+report can quote them verbatim. Reproducibility is handled by seeding NumPy,
+PyTorch, and Python for every experiment and by pinning the dataset download
+through a known SHA-256 hash. Correctness is guarded by thirty unit tests
+covering the gradient--divergence adjoint pair, the optical-flow derivatives and
+energy decrease, the unrolled forward pass and step positivity, the YOLO export
+round-trip, and the tracker's gap-closing logic; the suite runs on GitLab CI for
+every push. Style is enforced with \texttt{ruff} through a \texttt{pre-commit}
+configuration whose \texttt{no-commit-to-branch} hook protects \texttt{main} and
+keeps development on feature branches, and a CPU \texttt{Dockerfile} reproduces
+the environment so the experiments run identically inside a container. The
+project carries an MIT licence and a \texttt{README} documenting every command.
 
 \begin{thebibliography}{9}
 \bibitem{chambollepock}

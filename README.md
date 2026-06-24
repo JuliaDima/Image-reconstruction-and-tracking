@@ -1,9 +1,28 @@
 # Image Analysis Coursework
 
+[![pipeline status](https://gitlab.developers.cam.ac.uk/phy/data-intensive-science-mphil/assessments/a8_coursework/eid23/badges/main/pipeline.svg)](https://gitlab.developers.cam.ac.uk/phy/data-intensive-science-mphil/assessments/a8_coursework/eid23/-/commits/main)
+
 This repository contains the coursework implementation for the MPhil in Data
 Intensive Science image analysis assignment.
 
 The implementation covers the following structure: Part I.A classical restoration, Part I.B unrolled reconstruction experiments, Part II.A Horn-Schunck optical flow, Part II.B YOLO segmentation utilities, and Part II.C cell tracking utilities.
+
+## Repository layout
+
+```
+src/image_analysis_coursework/   installable package, one module per task
+  a1.py a2.py unrolling.py        Part I forward model, TV restoration, unrolled PGD
+  motion.py yolo_segmentation.py tracking.py   Part II flow, segmentation, tracking
+  cli_*.py                        thin command-line entry points
+scripts/                         runnable wrappers + Slurm submission helpers
+tests/                           pytest suite (run in GitLab CI)
+report/                          LaTeX source, self-contained figures/, and the PDF
+Dockerfile, .pre-commit-config.yaml, pyproject.toml, LICENSE
+```
+
+Every experiment seeds NumPy, PyTorch, and Python and writes its figures and a
+JSON metadata/metrics file, so the numbers quoted in the report can be traced
+back to `outputs/`.
 
 ## Setup
 
@@ -228,10 +247,45 @@ Full-run outputs are written to `outputs/part_i/b1_full/`,
 `outputs/part_i/b2_full/`, `outputs/part_i/b3_full/`,
 `outputs/part_ii/b/yolo_runs/`, and `outputs/part_ii/c_yolo/`.
 
+## Supplementary analysis figures
+
+Two CPU-only figures used in the report (the PSF and its modulation transfer
+function, and the Part I.A.2 reconstruction-error maps) are produced with:
+
+```bash
+python scripts/run_extra_figures.py
+```
+
 ## Report
 
 The LaTeX report source is in `report/main.tex`; the submission PDF is
-`report/main.pdf`.
+`report/main.pdf`. All figures it uses are committed under `report/figures/`, so
+the report rebuilds from a clean clone with `pdflatex main.tex` (run twice to
+resolve references).
+
+## Docker
+
+A CPU image reproduces the environment for the classical and motion experiments:
+
+```bash
+docker build -t image-analysis .
+docker run --rm image-analysis                       # runs the test suite
+docker run --rm -v "$PWD/outputs:/app/outputs" image-analysis \
+    python scripts/run_a2.py                         # runs an experiment
+```
+
+GPU training (Part I.B, YOLO) is run on the cluster through `scripts/sbatch_run.sh`.
+
+## Development and code quality
+
+Style is checked with `ruff` (configured in `pyproject.toml`) and enforced
+through `pre-commit`. The `no-commit-to-branch` hook protects `main`, so
+development happens on feature branches merged through merge requests:
+
+```bash
+pip install pre-commit && pre-commit install
+pre-commit run --all-files
+```
 
 ## Tests
 
@@ -242,3 +296,17 @@ pytest
 # or explicitly with the A8 venv
 /rds/user/${USER}/hpc-work/a8/venv/bin/python -m pytest
 ```
+
+## Licence
+
+Released under the MIT licence; see [LICENSE](LICENSE).
+
+## AI Assistance
+
+Claude (Anthropic) was used for the following tasks in this project:
+
+- **Figure generation** — iterating on the Python plotting scripts to produce ...
+- **LaTeX compilation** — debugging LaTeX/BibTeX errors, resolving package conflicts, and ensuring the report compiled cleanly to a single coherent PDF.
+- **Report appearance** — refining layout, caption sizing, figure placement, and diagrams.
+
+All experimental design, training runs, mathematical derivations, and written analysis are the author's own work.

@@ -7,6 +7,7 @@ name = "image-analysis-coursework"
 version = "0.1.0"
 description = "MPhil Data Intensive Science image analysis coursework"
 readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.11"
 dependencies = [
     "imagecodecs>=2026.3.6",
@@ -47,3 +48,11 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "scripts", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]

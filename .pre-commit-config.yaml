@@ -1,0 +1,22 @@
+# Commit hooks. `no-commit-to-branch` protects "main": direct commits to it are
+# rejected, forcing development on feature branches and merge requests.
+# Install once with `pre-commit install`.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: no-commit-to-branch
+        args: [--branch, main]
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        # Allows the report PDF and its figures; still catches stray datasets
+        # and model weights (which are also covered by .gitignore).
+        args: [--maxkb=15360]
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format

@@ -636,10 +636,18 @@ def _save_convergence_comparison(
         ("Blurred + noise", blurry[0, 0].numpy()),
         *[(f"T={iterations}", image) for iterations, image in reconstructions],
     ]
-    fig, axes = plt.subplots(1, len(panels), figsize=(4 * len(panels), 4), constrained_layout=True)
-    for axis, (title, image) in zip(np.ravel(axes), panels, strict=True):
+    n_panels = len(panels)
+    n_cols = min(3, n_panels)
+    n_rows = (n_panels + n_cols - 1) // n_cols
+    fig, axes = plt.subplots(
+        n_rows, n_cols, figsize=(4.6 * n_cols, 4.0 * n_rows), constrained_layout=True
+    )
+    flat_axes = np.atleast_1d(axes).ravel()
+    for axis, (title, image) in zip(flat_axes, panels, strict=False):
         axis.imshow(image, cmap="gray", vmin=0.0, vmax=1.0)
         axis.set_title(title)
+        axis.axis("off")
+    for axis in flat_axes[n_panels:]:
         axis.axis("off")
     fig.savefig(output_path, dpi=200)
     plt.close(fig)

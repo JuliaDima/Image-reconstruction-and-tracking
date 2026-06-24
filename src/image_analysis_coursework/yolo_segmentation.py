@@ -153,7 +153,7 @@ def prediction_to_label_image(prediction: Any, image_shape: tuple[int, int]) -> 
 def train_yolo_model(
     yolo_dataset_dir: str | Path,
     output_dir: str | Path = "outputs/part_ii/b/yolo_runs",
-    model_name: str = "yolo26n-seg.pt",
+    model_name: str = "yolo11n-seg.pt",
     epochs: int = 100,
     imgsz: int = 640,
     device: str | int | None = None,
