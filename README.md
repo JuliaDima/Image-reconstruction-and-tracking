@@ -1,6 +1,6 @@
 # Image Analysis Coursework
 
-[![pipeline status](https://gitlab.developers.cam.ac.uk/phy/data-intensive-science-mphil/assessments/a8_coursework/eid23/badges/main/pipeline.svg)](https://gitlab.developers.cam.ac.uk/phy/data-intensive-science-mphil/assessments/a8_coursework/eid23/-/commits/main)
+[![CI](https://github.com/JuliaDima/Image-reconstruction-and-tracking/actions/workflows/ci.yml/badge.svg)](https://github.com/JuliaDima/Image-reconstruction-and-tracking/actions)
 
 ** [The coursework report (report.pdf)](report.pdf)**
 
