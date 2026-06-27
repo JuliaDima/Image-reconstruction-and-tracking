@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/JuliaDima/Image-reconstruction-and-tracking/actions/workflows/ci.yml/badge.svg)](https://github.com/JuliaDima/Image-reconstruction-and-tracking/actions)
 
-** [The coursework report (report.pdf)](report.pdf)**
+[The coursework report (report.pdf)](report.pdf)
 
 This repository contains the coursework implementation for the MPhil in Data
 Intensive Science image analysis assignment.
