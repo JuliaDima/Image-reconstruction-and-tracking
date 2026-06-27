@@ -69,10 +69,16 @@ def test_nearest_neighbour_tracks_closes_one_missing_frame():
 
 
 def test_laptrack_runtime_error_is_not_silently_hidden(monkeypatch):
+    import unittest.mock as mock
+
     class BrokenLapTrack:
         def __init__(self, **kwargs):
             raise RuntimeError("invalid tracker configuration")
 
+    fake_pd = mock.MagicMock()
+    fake_pd.DataFrame.return_value.empty = False
+
+    monkeypatch.setitem(sys.modules, "pandas", fake_pd)
     monkeypatch.setitem(sys.modules, "laptrack", SimpleNamespace(LapTrack=BrokenLapTrack))
     labels = np.zeros((10, 10), dtype=np.uint16)
     labels[1:3, 1:3] = 1

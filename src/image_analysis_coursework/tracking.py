@@ -98,6 +98,9 @@ def _track_centroids_with_backend(
         return nearest_neighbour_tracks(detections, max_distance=max_distance, max_gap=max_gap), "nearest-neighbour"
     try:
         import pandas as pd
+    except ImportError:
+        return nearest_neighbour_tracks(detections, max_distance=max_distance, max_gap=max_gap), "nearest-neighbour"
+    try:
         from laptrack import LapTrack
     except ImportError:
         return nearest_neighbour_tracks(detections, max_distance=max_distance, max_gap=max_gap), "nearest-neighbour"
